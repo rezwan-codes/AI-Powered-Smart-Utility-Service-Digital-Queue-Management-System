@@ -1,47 +1,29 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Loader2, MessageCircle, Send, Users, X } from "lucide-react";
 import { authService } from "../../services/authService";
 import { chatService } from "../../services/chatService";
 import { technicianService } from "../../services/technicianService";
 import type { Technician, User } from "../../types/utility";
+import type { Conversation, ChatMessage as ServiceChatMessage } from "../../services/chatService";
 
-type TechnicianConversation = {
-  id: string;
-  technician?: {
-    id: string;
-    name: string;
-    skill: string;
-    status: string;
-    phone?: string;
-  };
-  updatedAt: string;
-};
+type ChatMessage = ServiceChatMessage & { timestamp: Date };
 
-type CitizenConversation = {
-  id: string;
-  citizen?: {
-    id: string;
-    name: string;
-    email: string;
-    phone?: string;
-  };
-  updatedAt: string;
-};
+interface TechnicianChatProps {
+  forceOpen?: boolean;
+  forceConversationId?: string | null;
+  onOpenChange?: (open: boolean) => void;
+  onConversationOpened?: (id: string) => void;
+}
 
-type ChatMessage = {
-  id: string;
-  senderId: string;
-  senderRole: string;
-  text: string;
-  createdAt: string;
-};
-
-export default function TechnicianChat() {
-  const [isOpen, setIsOpen] = useState(false);
+export default function TechnicianChat({
+  forceOpen,
+  forceConversationId,
+  onOpenChange,
+  onConversationOpened,
+}: TechnicianChatProps = {}) {
   const [user, setUser] = useState<User | null>(null);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
-  const [conversations, setConversations] = useState<(TechnicianConversation | CitizenConversation)[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -49,6 +31,30 @@ export default function TechnicianChat() {
   const [error, setError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [_isOpen, _setIsOpen] = useState(false);
+  const [_activeConversationId, _setActiveConversationId] = useState<string | null>(null);
+
+  const isOpen = forceOpen ?? _isOpen;
+  const activeConversationId = forceConversationId ?? _activeConversationId;
+
+  const setIsOpen = useCallback(
+    (open: boolean) => {
+      if (forceOpen !== undefined) {
+        onOpenChange?.(open);
+      } else {
+        _setIsOpen(open);
+      }
+    },
+    [forceOpen, onOpenChange],
+  );
+
+  const setActiveConversationId = useCallback(
+    (id: string | null) => {
+      if (forceConversationId === undefined) _setActiveConversationId(id);
+    },
+    [forceConversationId],
+  );
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -172,6 +178,7 @@ export default function TechnicianChat() {
 
   const handleOpenConversation = async (conversationId: string) => {
     setActiveConversationId(conversationId);
+    onConversationOpened?.(conversationId);
     setError("");
   };
 
@@ -267,11 +274,19 @@ export default function TechnicianChat() {
                             <Users size={16} />
                           </div>
                           <div>
-                            <p className="text-sm font-semibold">{(conversation as CitizenConversation).citizen?.name ?? "Unknown"}</p>
-                            <p className="text-xs text-slate-500">{(conversation as CitizenConversation).citizen?.email}</p>
+                            <p className="text-sm font-semibold">{conversation.citizen?.name ?? "Unknown"}</p>
+                            <p className="text-xs text-slate-500">{conversation.citizen?.email}</p>
                           </div>
                         </div>
-                        <p className="text-xs text-slate-400">Tap to open chat</p>
+                        {conversation.complaint ? (
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">{conversation.complaint.token}</span>
+                            <span className="rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">{conversation.complaint.status}</span>
+                            <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">{conversation.complaint.priority}</span>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400">Tap to open chat</p>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -279,14 +294,14 @@ export default function TechnicianChat() {
               ) : (
                 <div className="space-y-2">
                   {technicians.map((technician) => {
-                    const hasConversation = conversations.some((c) => (c as TechnicianConversation).technician?.id === technician.id);
+                    const hasConversation = conversations.some((c) => c.technician?.id === technician.id);
                     return (
                       <button
                         key={technician.id}
                         onClick={() =>
                           hasConversation
                             ? handleOpenConversation(
-                                (conversations.find((c) => (c as TechnicianConversation).technician?.id === technician.id) as TechnicianConversation).id,
+                                conversations.find((c) => c.technician?.id === technician.id)!.id,
                               )
                             : handleStartConversation(technician.id)
                         }
@@ -319,11 +334,24 @@ export default function TechnicianChat() {
                 >
                   ← Back to list
                 </button>
-                <span className="text-xs text-slate-500">
-                  {isTechnician
-                    ? (conversations.find((c) => c.id === activeConversationId) as CitizenConversation | undefined)?.citizen?.name ?? "Chat"
-                    : (conversations.find((c) => c.id === activeConversationId) as TechnicianConversation | undefined)?.technician?.name ?? "Chat"}
-                </span>
+                <div className="text-right">
+                  {(() => {
+                    const current = conversations.find((c) => c.id === activeConversationId);
+                    const name = isTechnician ? current?.citizen?.name : current?.technician?.name;
+                    if (!current) return <span className="text-xs text-slate-500">Chat</span>;
+                    return (
+                      <>
+                        <span className="text-xs font-semibold text-slate-700">{name ?? "Chat"}</span>
+                        {current.complaint && (
+                          <div className="flex items-center justify-end gap-1">
+                            <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-bold text-slate-700">{current.complaint.token}</span>
+                            <span className="rounded-full bg-sky-50 px-1 py-0.5 text-[10px] font-bold text-sky-700">{current.complaint.status}</span>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
               <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4">
                 {chatMessages.map((msg) => {

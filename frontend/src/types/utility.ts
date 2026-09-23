@@ -1,4 +1,4 @@
-export type UtilityType = "Water" | "Gas" | "Electricity";
+export type UtilityType = "Water" | "Gas" | "Electricity" | "Waste" | "Streetlight" | "Others";
 export type ComplaintStatus = "Pending" | "Processing" | "Completed" | "Cancelled";
 export type ComplaintPriority = "Normal" | "High" | "Emergency";
 export type TechnicianStatus = "Active" | "Busy" | "Offline";

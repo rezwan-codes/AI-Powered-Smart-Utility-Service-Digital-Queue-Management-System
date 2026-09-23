@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, Droplets, Flame, Zap } from "lucide-react";
+import { AlertTriangle, Droplets, Flame, Lightbulb, MoreHorizontal, Trash2, Zap } from "lucide-react";
 import type { Complaint, ComplaintPriority, ComplaintStatus, UtilityType } from "../types/utility";
 
 export type AreaIssue = {
@@ -33,6 +33,24 @@ export const utilityStyles: Record<
     bg: "bg-emerald-50",
     text: "text-emerald-700",
     border: "border-emerald-200",
+  },
+  Waste: {
+    Icon: Trash2,
+    bg: "bg-emerald-50",
+    text: "text-emerald-700",
+    border: "border-emerald-200",
+  },
+  Streetlight: {
+    Icon: Lightbulb,
+    bg: "bg-violet-50",
+    text: "text-violet-700",
+    border: "border-violet-200",
+  },
+  Others: {
+    Icon: MoreHorizontal,
+    bg: "bg-slate-50",
+    text: "text-slate-700",
+    border: "border-slate-200",
   },
 };
 

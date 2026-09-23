@@ -1,4 +1,5 @@
 import { Navigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 type Role = "citizen" | "technician" | "admin";
 
@@ -8,23 +9,31 @@ type ProtectedRouteProps = {
 };
 
 export default function ProtectedRoute({ children, roles }: ProtectedRouteProps) {
-  const token = localStorage.getItem("smartUtilityToken");
-  const role = localStorage.getItem("role") as Role | null;
+  const { user, token, loading, initialized } = useAuth();
+  const storedRole = (typeof window !== "undefined" ? localStorage.getItem("role") : null) as Role | null;
+  const role = (user?.role.toLowerCase() as Role | undefined) ?? storedRole;
 
-  if (!token) {
+  if (!initialized || loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
+  if (!token || !user) {
     return <Navigate to="/user/login" replace />;
   }
 
-  if (roles && role && !roles.includes(role)) {
+  if (roles && (!role || !roles.includes(role))) {
     const redirect =
       role === "admin"
         ? "/admin/dashboard"
         : role === "technician"
           ? "/technician/dashboard"
           : "/dashboard";
-
     return <Navigate to={redirect} replace />;
   }
 
-  return children;
+  return <>{children}</>;
 }

@@ -3,14 +3,20 @@ import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   BarChart3,
+  Bell,
   CheckCircle2,
+  ChevronRight,
   ClipboardList,
+  Home,
   LogOut,
   MapPinned,
   Menu,
+  MoreHorizontal,
   RefreshCw,
   ShieldAlert,
+  Star,
   UserCog,
+  Users,
   Wrench,
   Activity,
   TrendingUp,
@@ -69,6 +75,68 @@ const adminSections: AdminSection[] = [
   "Analytics",
 ];
 
+const adminNavIcons: Record<AdminSection, LucideIcon> = {
+  Dashboard: Home,
+  Complaints: ClipboardList,
+  Technicians: Users,
+  Users: UserCog,
+  "Live Map": MapPinned,
+  "Emergency Alerts": AlertTriangle,
+  Analytics: BarChart3,
+};
+
+const complaintTypeColors: Record<string, string> = {
+  Electricity: "#10b981",
+  Water: "#2563eb",
+  Gas: "#f59e0b",
+  Waste: "#a855f7",
+  Streetlight: "#ef476f",
+  Others: "#94a3b8",
+};
+
+const sparklineValues = [
+  [13, 12, 13, 15, 15, 14, 16, 16, 19, 18, 20, 22, 22, 21, 18, 17],
+  [6, 5, 6, 7, 8, 7, 9, 10, 13, 11, 12, 11, 12, 10, 9, 8],
+  [9, 8, 9, 9, 10, 11, 11, 14, 13, 16, 15, 16, 14, 15, 13, 12],
+  [8, 8, 9, 8, 10, 10, 11, 10, 12, 11, 13, 12, 15, 14, 15, 13],
+];
+
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function getInitials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function Sparkline({ color, values }: { color: string; values: number[] }) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 1);
+  const points = values
+    .map((value, index) => {
+      const x = (index / (values.length - 1)) * 100;
+      const y = 34 - ((value - min) / range) * 28;
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  return (
+    <svg viewBox="0 0 100 38" className="h-10 w-full overflow-visible" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={points} fill="none" stroke={color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 interface ActivityItem {
   id: string;
   message: string;
@@ -96,7 +164,7 @@ export default function AdminDashboard() {
   const [userRoleFilter, setUserRoleFilter] = useState<UserRole | "">("");
   const [mapLocations, setMapLocations] = useState<MapLocation[]>([]);
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [, setActivities] = useState<ActivityItem[]>([]);
   const [pollInterval, setPollInterval] = useState<number>(8);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -512,6 +580,70 @@ export default function AdminDashboard() {
       .sort((a, b) => b.totalJobs - a.totalJobs)
       .slice(0, 8);
   }, [technicians, complaints]);
+
+  const complaintOverviewData = useMemo(() => {
+    const counts = complaints.reduce<Record<string, number>>((acc, complaint) => {
+      acc[complaint.type] = (acc[complaint.type] || 0) + 1;
+      return acc;
+    }, {});
+
+    const source = Object.keys(counts).length
+      ? Object.entries(counts).map(([name, value]) => ({
+          name,
+          value,
+          fill: complaintTypeColors[name] ?? complaintTypeColors.Others,
+        }))
+      : (analytics?.complaintsByType ?? []).map((item) => ({
+          name: item.type,
+          value: item._count,
+          fill: complaintTypeColors[item.type] ?? complaintTypeColors.Others,
+        }));
+
+    return source.sort((a, b) => b.value - a.value);
+  }, [analytics, complaints]);
+
+  const recentActivityItems = useMemo(() => {
+    const complaintItems = complaints
+      .slice(0, 5)
+      .map((complaint) => ({
+        id: `complaint-${complaint.id}`,
+        title:
+          complaint.priority === "Emergency"
+            ? "New emergency alert"
+            : complaint.status === "Completed"
+              ? "Complaint completed"
+              : complaint.technician
+                ? "Technician assigned"
+                : "New complaint received",
+        detail:
+          complaint.status === "Completed"
+            ? `${complaint.token} has been resolved`
+            : complaint.technician
+              ? `${complaint.token} assigned to ${complaint.technician.name}`
+              : `${complaint.title} in ${complaint.area}`,
+        timestamp: new Date(complaint.updatedAt ?? complaint.createdAt).getTime(),
+        type:
+          complaint.priority === "Emergency"
+            ? "emergency"
+            : complaint.status === "Completed"
+              ? "completed"
+              : complaint.technician
+                ? "assign"
+                : "new",
+      }));
+
+    const requestItems = requests.slice(0, 3).map((request) => ({
+      id: `request-${request.id}`,
+      title: "Technician request",
+      detail: `${request.technician?.name ?? "Technician"} requested ${request.type.toLowerCase()}`,
+      timestamp: new Date(request.createdAt).getTime(),
+      type: "request",
+    }));
+
+    return [...complaintItems, ...requestItems]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 6);
+  }, [complaints, requests]);
 
   const sectionTitles: Record<AdminSection, string> = {
     Dashboard: "Admin Dashboard",
@@ -1375,105 +1507,287 @@ export default function AdminDashboard() {
     </div>
   );
 
+  const renderActivityIcon = (type: string) => {
+    if (type === "emergency") return <AlertTriangle size={18} className="text-red-600" />;
+    if (type === "assign" || type === "request") return <Users size={18} className="text-emerald-600" />;
+    if (type === "completed") return <CheckCircle2 size={18} className="text-violet-600" />;
+    return <ClipboardList size={18} className="text-blue-600" />;
+  };
+
+  const renderDashboardComplaintTable = () => (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[840px] text-left text-xs">
+        <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-4 py-3">Token</th>
+            <th className="px-4 py-3">Issue</th>
+            <th className="px-4 py-3">Area</th>
+            <th className="px-4 py-3">Priority</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">Technician</th>
+            <th className="px-4 py-3">Time</th>
+            <th className="px-4 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {complaints.slice(0, 5).map((complaint) => (
+            <tr key={complaint.id} className="text-slate-700">
+              <td className="px-4 py-3 font-bold text-slate-950">{complaint.token}</td>
+              <td className="px-4 py-3 font-semibold">{complaint.title}</td>
+              <td className="px-4 py-3">{complaint.area}</td>
+              <td className="px-4 py-3">
+                <span className={`rounded-full px-3 py-1 font-bold ${priorityStyles[complaint.priority]}`}>
+                  {complaint.priority === "Normal" ? "Low" : complaint.priority}
+                </span>
+              </td>
+              <td className="px-4 py-3">
+                <span className={`rounded-full px-3 py-1 font-bold ${statusStyles[complaint.status]}`}>
+                  {complaint.status}
+                </span>
+              </td>
+              <td className="px-4 py-3">{complaint.technician?.name ?? "—"}</td>
+              <td className="px-4 py-3 text-slate-500">{timeAgo(new Date(complaint.updatedAt ?? complaint.createdAt).getTime())}</td>
+              <td className="px-4 py-3 text-right">
+                <button
+                  onClick={() => selectSection("Complaints")}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                  aria-label={`Manage ${complaint.token}`}
+                >
+                  <MoreHorizontal size={16} />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!complaints.length && <p className="px-4 py-6 text-center text-sm text-slate-500">No complaints found.</p>}
+    </div>
+  );
+
+  const renderDashboardContent = () => {
+    const totalOverview = complaintOverviewData.reduce((sum, item) => sum + item.value, 0);
+
+    return (
+      <div className="space-y-5">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {stats.map(({ label, value, Icon, iconBg, pulse, trend }, index) => {
+            const lineColor = index === 0 ? "#2563eb" : index === 1 ? "#ef4444" : index === 2 ? "#10b981" : "#a855f7";
+            const trendText = label === "Emergency Alerts" ? "5% from yesterday" : `${trend ?? "8%"} from yesterday`;
+
+            return (
+              <article
+                key={label}
+                className={`rounded-lg border border-slate-200 bg-white p-5 shadow-sm ${pulse ? "ring-1 ring-red-100" : ""}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${iconBg}`}>
+                    <Icon size={24} />
+                  </div>
+                  {pulse && <span className="mt-2 h-2.5 w-2.5 rounded-full bg-red-500 shadow-[0_0_0_5px_rgba(239,68,68,0.12)]" />}
+                </div>
+                <div className="mt-3 flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">{label === "Completed" ? "Completed Today" : label}</p>
+                    <p className="mt-1 text-3xl font-black text-slate-950">{value}</p>
+                    <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-slate-500">
+                      <TrendingUp size={12} className={label === "Emergency Alerts" ? "text-slate-700" : "text-emerald-600"} />
+                      {trendText}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <Sparkline color={lineColor} values={sparklineValues[index]} />
+                </div>
+              </article>
+            );
+          })}
+        </section>
+
+        <section className="grid gap-5 xl:grid-cols-[1.1fr_1.2fr_0.95fr]">
+          <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-black text-slate-950">Complaint Overview</h2>
+            </div>
+            <div className="grid items-center gap-5 sm:grid-cols-[210px_1fr] xl:grid-cols-1 2xl:grid-cols-[210px_1fr]">
+              <div className="relative h-52">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={complaintOverviewData}
+                      dataKey="value"
+                      innerRadius={64}
+                      outerRadius={92}
+                      paddingAngle={2}
+                      stroke="none"
+                    >
+                      {complaintOverviewData.map((entry) => (
+                        <Cell key={entry.name} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-sm font-semibold text-slate-500">Total</span>
+                  <span className="text-2xl font-black text-slate-950">{totalOverview}</span>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {complaintOverviewData.slice(0, 6).map((item) => {
+                  const percent = totalOverview ? Math.round((item.value / totalOverview) * 1000) / 10 : 0;
+                  return (
+                    <div key={item.name} className="flex items-center gap-3 text-sm">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.fill }} />
+                      <span className="flex-1 font-medium text-slate-600">{item.name}</span>
+                      <span className="font-bold text-slate-900">{item.value}</span>
+                      <span className="w-14 text-right text-slate-500">({percent}%)</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <button
+              onClick={() => selectSection("Analytics")}
+              className="mt-4 flex w-full items-center justify-center gap-2 border-t border-slate-100 pt-4 text-sm font-bold text-blue-600 hover:text-blue-700"
+            >
+              View full analytics <ChevronRight size={16} />
+            </button>
+          </article>
+
+          <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-black text-slate-950">Live Complaint Map</h2>
+              <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                Live
+              </span>
+            </div>
+            <div className="overflow-hidden rounded-md border border-slate-200">
+              <MapTracker
+                height="245px"
+                locations={mapLocations}
+                technicianLocations={liveTechnicianLocations}
+                initialLocation={{ lat: 23.8103, lng: 90.4125 }}
+              />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-bold text-slate-600 sm:grid-cols-4">
+              {[
+                ["Emergency", "bg-red-500"],
+                ["High", "bg-amber-500"],
+                ["Medium", "bg-blue-600"],
+                ["Low", "bg-emerald-600"],
+              ].map(([label, color]) => (
+                <span key={label} className="flex items-center justify-center gap-2 rounded-md border border-slate-100 py-2">
+                  <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
+                  {label}
+                </span>
+              ))}
+            </div>
+          </article>
+
+          <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-black text-slate-950">Recent Activity</h2>
+              <button onClick={() => selectSection("Complaints")} className="text-xs font-bold text-blue-600">
+                View all
+              </button>
+            </div>
+            <div className="space-y-4">
+              {recentActivityItems.map((item) => (
+                <div key={item.id} className="flex gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-50 ring-1 ring-slate-100">
+                    {renderActivityIcon(item.type)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="font-bold text-slate-950">{item.title}</p>
+                      <span className="shrink-0 text-xs text-slate-400">{timeAgo(item.timestamp)}</span>
+                    </div>
+                    <p className="mt-0.5 truncate text-sm text-slate-500">{item.detail}</p>
+                  </div>
+                </div>
+              ))}
+              {!recentActivityItems.length && <p className="text-sm text-slate-500">No activity yet.</p>}
+            </div>
+          </article>
+        </section>
+
+        <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
+          <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-black text-slate-950">Recent Complaints</h2>
+              <button
+                onClick={() => selectSection("Complaints")}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-50"
+              >
+                View all
+              </button>
+            </div>
+            {renderDashboardComplaintTable()}
+          </article>
+
+          <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-black text-slate-950">Technician Performance</h2>
+              <button onClick={() => selectSection("Technicians")} className="text-xs font-bold text-blue-600">
+                View all
+              </button>
+            </div>
+            <div className="space-y-4">
+              {technicianPerformance.slice(0, 4).map((tech, index) => {
+                const percent = tech.efficiency || Math.min(92, Math.round(tech.rating * 18));
+                return (
+                  <div key={tech.id} className="grid grid-cols-[20px_1fr] items-center gap-3">
+                    <span className="text-sm font-bold text-slate-700">{index + 1}.</span>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-900 to-blue-700 text-xs font-black text-white">
+                        {getInitials(tech.name)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="truncate text-sm font-black text-slate-950">{tech.name}</p>
+                          <span className="text-xs font-bold text-slate-600">{percent}%</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
+                          <span>Completed: {tech.completedJobs}</span>
+                          <span className="flex items-center gap-1 font-bold text-slate-700">
+                            {tech.rating.toFixed(1)}
+                            <Star size={12} className="fill-amber-400 text-amber-400" />
+                          </span>
+                        </div>
+                        <div className="mt-2 h-1.5 rounded-full bg-slate-100">
+                          <div className="h-1.5 rounded-full bg-emerald-500" style={{ width: `${percent}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {!technicianPerformance.length && <p className="text-sm text-slate-500">No technicians registered yet.</p>}
+            </div>
+          </article>
+        </section>
+      </div>
+    );
+  };
+
   const renderSectionContent = () => {
     switch (activeSection) {
       case "Dashboard":
-        return (
-          <div className="space-y-6">
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {stats.map(({ label, value, Icon, gradient, iconBg, pulse, trend }) => (
-                <div
-                  key={label}
-                  className={`group relative overflow-hidden rounded-2xl bg-white p-5 shadow-sm transition-all duration-300 hover:shadow-xl hover:-translate-y-1 ${
-                    pulse ? "animate-glow" : ""
-                  }`}
-                >
-                  <div className={`absolute -right-4 -top-4 h-24 w-24 rounded-full bg-gradient-to-br ${gradient} opacity-10 blur-2xl transition-opacity duration-300 group-hover:opacity-20`} />
-                  <div className="relative flex items-center justify-between">
-                    <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${iconBg} transition-transform duration-300 group-hover:scale-110`}>
-                      <Icon size={24} />
-                    </div>
-                    {pulse && (
-                      <span className="relative flex h-3 w-3">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
-                        <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
-                      </span>
-                    )}
-                    {trend && !pulse && (
-                      <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
-                        <TrendingUp size={12} />
-                        {trend}
-                      </span>
-                    )}
-                  </div>
-                  <div className="relative mt-4">
-                    <p className="text-3xl font-bold text-slate-950">{value}</p>
-                    <p className="mt-1 text-sm text-slate-500">{label}</p>
-                  </div>
-                  <div className={`mt-3 h-1 w-full rounded-full bg-gradient-to-r ${gradient} opacity-20 transition-opacity duration-300 group-hover:opacity-40`} />
-                </div>
-              ))}
-            </section>
-            <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
-              <div className="rounded-lg bg-white p-5 shadow-sm">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-xl font-bold">Recent Complaints</h2>
-                  <span className="rounded-full bg-sky-100 px-3 py-1 text-sm font-semibold text-sky-700">
-                    {complaints.length} total
-                  </span>
-                </div>
-                {renderComplaintTable(complaints.slice(0, 8))}
-              </div>
-              <div className="space-y-6">
-                {renderRequestsPanel()}
-                {activities.length > 0 && (
-                  <div className="rounded-lg bg-white p-5 shadow-sm">
-                    <h3 className="text-lg font-bold">Live Activity Feed</h3>
-                    <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
-                      {activities.slice(0, 10).map((activity) => (
-                        <div key={activity.id} className="flex items-start gap-2 text-sm">
-                          <span
-                            className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${
-                              activity.type === "emergency"
-                                ? "bg-red-500"
-                                : activity.type === "assign"
-                                  ? "bg-sky-500"
-                                  : activity.type === "status"
-                                    ? "bg-emerald-500"
-                                    : activity.type === "delete"
-                                      ? "bg-red-500"
-                                      : activity.type === "role"
-                                        ? "bg-amber-500"
-                                        : "bg-slate-400"
-                            }`}
-                          />
-                          <span className="flex-1 text-slate-700">{activity.message}</span>
-                          <span className="shrink-0 text-xs text-slate-400">
-                            {new Intl.DateTimeFormat(undefined, {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              second: "2-digit",
-                            }).format(new Date(activity.timestamp))}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
+        return renderDashboardContent();
       case "Complaints":
         return (
-          <div className="rounded-lg bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold">Complaint Queue</h2>
-              <span className="rounded-full bg-sky-100 px-3 py-1 text-sm font-semibold text-sky-700">
-                {complaints.length} total
-              </span>
+          <div className="space-y-5">
+            <div className="rounded-lg bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold">Complaint Queue</h2>
+                <span className="rounded-full bg-sky-100 px-3 py-1 text-sm font-semibold text-sky-700">
+                  {complaints.length} total
+                </span>
+              </div>
+              {renderComplaintTable(complaints)}
             </div>
-            {renderComplaintTable(complaints)}
+            {renderRequestsPanel()}
           </div>
         );
       case "Technicians":
@@ -1500,61 +1814,89 @@ export default function AdminDashboard() {
   };
 
   const sidebar = (
-    <>
-      <div className="flex items-center gap-3">
-        <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-sky-600 shadow-lg shadow-sky-500/30">
+    <div className="flex h-full flex-col overflow-hidden bg-[#071326] text-white">
+      <div className="flex items-center gap-3 px-4 py-5">
+        <div className="relative flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/40">
           <UserCog size={22} className="text-white" />
-          <div className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
+          <div className="absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full bg-emerald-400 ring-2 ring-[#071326]" />
         </div>
         <div>
-          <p className="font-bold text-white">Authority Panel</p>
-          <p className="text-xs text-slate-400">Digital Queue System</p>
+          <p className="text-base font-black text-white">Authority Panel</p>
+          <p className="text-xs font-medium text-slate-300">Digital Queue System</p>
         </div>
       </div>
-      <nav className="mt-8 space-y-1.5 text-sm">
+
+      <nav className="mt-3 flex-1 space-y-2 px-4 text-sm">
         {adminSections.map((item) => (
           <button
             key={item}
             onClick={() => selectSection(item)}
-            className={`relative w-full rounded-lg px-3 py-2.5 text-left font-semibold transition-all duration-200 ${
+            className={`flex w-full items-center gap-3 rounded-md px-3 py-3 text-left font-bold transition ${
               activeSection === item
-                ? "bg-gradient-to-r from-sky-500 to-sky-600 text-white shadow-lg shadow-sky-500/30"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
                 : "text-slate-300 hover:bg-white/10 hover:text-white"
             }`}
           >
-            {activeSection === item && (
-              <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-sky-500 to-sky-600 opacity-100" />
+            {(() => {
+              const Icon = adminNavIcons[item];
+              return <Icon size={19} />;
+            })()}
+            <span className="min-w-0 flex-1">{item}</span>
+            {item === "Emergency Alerts" && emergencyComplaints.length > 0 && (
+              <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-black text-white">
+                {emergencyComplaints.length}
+              </span>
             )}
-            <span className="relative flex items-center justify-between">
-              {item}
-              {item === "Dashboard" && pendingRequests.length > 0 && (
-                <span className="relative z-10 rounded-full bg-amber-400 px-2 py-0.5 text-xs text-slate-950 font-bold animate-pulse">
-                  {pendingRequests.length}
-                </span>
-              )}
-            </span>
+            {item === "Dashboard" && pendingRequests.length > 0 && (
+              <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-black text-slate-950">
+                {pendingRequests.length}
+              </span>
+            )}
           </button>
         ))}
       </nav>
-      <div className="mt-auto pt-8">
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-xs text-slate-300">
-            <Activity size={14} className="text-emerald-400" />
-            <span>System Status</span>
+
+      <div className="px-4 pb-4">
+        <div className="mb-4 rounded-lg border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-200">
+            <Activity size={16} className="text-emerald-400" />
+            System Status
           </div>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-            </span>
-            <span className="text-xs font-semibold text-emerald-400">All systems operational</span>
+          <p className="mt-3 text-xs font-bold text-emerald-400">All systems operational</p>
+          <div className="mt-4 space-y-3 border-t border-white/10 pt-3 text-xs text-slate-300">
+            {[
+              ["Database", "Online"],
+              ["API Server", "Online"],
+              ["WebSocket", "Online"],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between">
+                <span>{label}</span>
+                <span className="flex items-center gap-1.5 text-emerald-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  {value}
+                </span>
+              </div>
+            ))}
           </div>
-          <div className="mt-2 text-xs text-slate-400">
-            Polling: {pollInterval}s
+          <p className="mt-4 border-t border-white/10 pt-3 text-xs text-slate-400">Uptime: 99.9%</p>
+        </div>
+
+        <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 p-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">
+            MR
           </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-black text-white">MD Rezwan Molla</p>
+            <p className="text-xs text-slate-300">Super Admin</p>
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-300">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              Online
+            </p>
+          </div>
+          <ChevronRight size={16} className="text-slate-400" />
         </div>
       </div>
-    </>
+    </div>
   );
 
   const timeAgo = (timestamp: number) => {
@@ -1567,47 +1909,61 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-950">
-      <aside className="fixed inset-y-0 left-0 hidden w-64 bg-slate-950 p-5 text-white lg:block">{sidebar}</aside>
+    <div className="min-h-screen bg-[#f4f7fb] text-slate-950">
+      <aside className="fixed inset-y-0 left-0 hidden w-[280px] text-white lg:block">{sidebar}</aside>
 
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
-          <aside className="relative h-full w-64 bg-slate-950 p-5 text-white">{sidebar}</aside>
+          <aside className="relative h-full w-[280px] text-white">{sidebar}</aside>
         </div>
       )}
 
-      <main className="px-5 py-6 sm:px-8 lg:ml-64">
-        <header className="mb-6 flex flex-col justify-between gap-4 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 p-6 shadow-xl sm:flex-row sm:items-center">
+      <main className="px-4 py-5 sm:px-6 lg:ml-[280px] xl:px-7">
+        <header className="mb-5 flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-center">
           <div className="flex items-start gap-3">
             <button
               onClick={() => setMobileNavOpen(true)}
-              className="rounded-lg bg-white/10 p-2 lg:hidden backdrop-blur-sm"
+              className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm lg:hidden"
               aria-label="Open navigation"
             >
-              <Menu size={20} className="text-white" />
+              <Menu size={20} className="text-slate-700" />
             </button>
             <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-white">{sectionTitles[activeSection]}</h1>
-                {activeSection === "Dashboard" && (
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-sm text-slate-300">{sectionDescriptions[activeSection]}</p>
+              <h1 className="text-2xl font-black tracking-normal text-slate-950">
+                {activeSection === "Dashboard" ? `${getGreeting()}, Admin` : sectionTitles[activeSection]}
+                {activeSection === "Dashboard" && <span className="ml-2 text-amber-400">👋</span>}
+              </h1>
+              <p className="mt-1 text-sm font-medium text-slate-500">
+                {activeSection === "Dashboard"
+                  ? "Here's an overview of today's operations"
+                  : sectionDescriptions[activeSection]}
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="hidden items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-semibold text-slate-200 backdrop-blur-sm md:flex">
-              <Activity size={14} className="text-emerald-400" />
-              <span className="text-emerald-400">Live</span>
-              <span className="text-slate-400">•</span>
-              <span>{currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <div className="hidden items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm sm:flex">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="text-emerald-600">Live</span>
             </div>
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-semibold text-slate-200 backdrop-blur-sm">
+            <div className="hidden min-w-[116px] text-center text-sm font-bold text-slate-800 md:block">
+              <p>{currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</p>
+              <p className="text-xs font-medium text-slate-500">
+                {currentTime.toLocaleDateString(undefined, { month: "short", day: "2-digit", year: "numeric" })}
+              </p>
+            </div>
+            <button
+              className="relative flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-800 shadow-sm transition hover:bg-slate-50"
+              aria-label="Notifications"
+            >
+              <Bell size={18} />
+              {(pendingRequests.length || emergencyComplaints.length) > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white">
+                  {pendingRequests.length + emergencyComplaints.length}
+                </span>
+              )}
+            </button>
+            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-600 shadow-sm">
               <span
                 className={`h-2 w-2 rounded-full ${
                   isRefreshing ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
@@ -1619,7 +1975,7 @@ export default function AdminDashboard() {
             <button
               onClick={() => loadData(true)}
               disabled={isRefreshing}
-              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-white/10 disabled:opacity-60 backdrop-blur-sm"
+              className="flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
             >
               <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} />
               <span className="hidden sm:inline">Refresh</span>
@@ -1627,7 +1983,7 @@ export default function AdminDashboard() {
             <select
               value={pollInterval}
               onChange={(event) => setPollInterval(Number(event.target.value))}
-              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-semibold text-white outline-none focus:border-sky-400 backdrop-blur-sm"
+              className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 shadow-sm outline-none focus:border-blue-400"
             >
               <option value={3} className="text-slate-900">3s</option>
               <option value={5} className="text-slate-900">5s</option>
@@ -1641,7 +1997,7 @@ export default function AdminDashboard() {
                   navigate("/");
                 }
               }}
-              className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-500 to-red-600 px-5 py-2.5 font-semibold text-white shadow-lg shadow-red-500/30 transition-all hover:from-red-600 hover:to-red-700 hover:shadow-xl hover:shadow-red-500/40"
+              className="flex h-10 items-center justify-center gap-2 rounded-md bg-blue-600 px-4 font-bold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700"
             >
               <LogOut size={18} />
               <span className="hidden sm:inline">Logout</span>
@@ -1654,8 +2010,8 @@ export default function AdminDashboard() {
             <button
               key={item}
               onClick={() => selectSection(item)}
-              className={`whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold ${
-                activeSection === item ? "bg-slate-950 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
+              className={`whitespace-nowrap rounded-md px-3 py-2 text-sm font-bold ${
+                activeSection === item ? "bg-blue-600 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
               }`}
             >
               {item}

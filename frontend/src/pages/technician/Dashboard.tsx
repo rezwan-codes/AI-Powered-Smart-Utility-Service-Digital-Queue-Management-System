@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  BarChart3,
+  Bell,
   ChevronDown,
   ChevronUp,
   CheckCircle2,
@@ -11,23 +13,26 @@ import {
   LogOut,
   MapPin,
   Menu,
-  MessageSquare,
   Navigation,
   Phone,
   Send,
   ShieldAlert,
+  SlidersHorizontal,
+  Star,
+  WalletCards,
   Wrench,
   RefreshCw,
   Activity,
-  TrendingUp,
+  Zap,
 } from "lucide-react";
-import ApiStatusBanner from "../../components/ApiStatusBanner";
 import MapTracker from "../../components/map/MapTracker";
 import type { MapLocation } from "../../components/map/MapTracker";
 import { useLiveLocation } from "../../hooks/useLiveLocation";
 import { authService } from "../../services/authService";
 import { complaintService } from "../../services/complaintService";
 import { requestService } from "../../services/requestService";
+import { notificationService } from "../../services/notificationService";
+import type { Notification } from "../../services/notificationService";
 import type {
   Complaint,
   ComplaintPriority,
@@ -39,6 +44,7 @@ import type {
 import { buildComplaintMapLocations } from "../../utils/mapLocations";
 import {
   averageEtaMinutes,
+  formatDistance,
   formatEta,
   formatSubmittedAt,
   priorityStyles,
@@ -46,8 +52,6 @@ import {
 } from "../../utils/utilityDisplay";
 
 type TechnicianSection = "Dashboard" | "My Jobs" | "Available Jobs" | "Admin Requests";
-
-const SECTIONS: TechnicianSection[] = ["Dashboard", "My Jobs", "Available Jobs", "Admin Requests"];
 
 const STATUSES: ComplaintStatus[] = ["Pending", "Processing"];
 const PRIORITIES: ComplaintPriority[] = ["Normal", "High", "Emergency"];
@@ -73,7 +77,7 @@ export default function TechnicianDashboard() {
   const [actionError, setActionError] = useState("");
   const [jobMapLocations, setJobMapLocations] = useState<MapLocation[]>([]);
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [, setActivities] = useState<ActivityItem[]>([]);
   const [pollInterval, setPollInterval] = useState<number>(8);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -93,6 +97,10 @@ export default function TechnicianDashboard() {
   const [sortBy, setSortBy] = useState<SortKey>("priority");
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [showCompletedInAssignments, setShowCompletedInAssignments] = useState(false);
+
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotificationsPanel, setShowNotificationsPanel] = useState(false);
 
   const liveLocation = useLiveLocation(Boolean(currentUser));
 
@@ -118,16 +126,21 @@ export default function TechnicianDashboard() {
   const loadData = useCallback(async (showRefreshIndicator = false) => {
     if (showRefreshIndicator) setIsRefreshing(true);
     try {
-      const [userData, assignedData, openData, requestData] = await Promise.all([
-        authService.me(),
-        complaintService.list(),
-        complaintService.listOpenJobs(),
-        requestService.list(),
-      ]);
+      const [userData, assignedData, openData, requestData, notifCount, notifList] =
+        await Promise.all([
+          authService.me(),
+          complaintService.list(),
+          complaintService.listOpenJobs(),
+          requestService.list(),
+          notificationService.unreadCount().catch(() => ({ count: 0 })),
+          notificationService.list().catch(() => ({ notifications: [] })),
+        ]);
       setCurrentUser(userData.user);
       setComplaints(assignedData.complaints);
       setOpenJobs(openData.complaints);
       setRequests(requestData.requests);
+      setUnreadCount(notifCount.count);
+      setNotifications(notifList.notifications);
       setLastUpdated(Date.now());
       setError("");
     } catch {
@@ -230,6 +243,23 @@ export default function TechnicianDashboard() {
     setMobileNavOpen(false);
   };
 
+  const handleNotificationClick = async (notification: Notification) => {
+    if (!notification.isRead) {
+      await notificationService.markAsRead(notification.id);
+    }
+    setShowNotificationsPanel(false);
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === notification.id ? { ...n, isRead: true } : n)),
+    );
+    setUnreadCount((prev) => Math.max(0, prev - 1));
+  };
+
+  const handleMarkAllRead = async () => {
+    await notificationService.markAllAsRead();
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    setUnreadCount(0);
+  };
+
   const resetAssignmentFilters = () => {
     setStatusFilter("all");
     setPriorityFilter("all");
@@ -257,62 +287,173 @@ export default function TechnicianDashboard() {
     "Admin Requests": "Track requests you sent to the authority panel.",
   };
 
+  const technicianSkill = currentUser?.technician?.skill ?? "Field Service";
+  const liveStatusText =
+    liveLocation.status === "tracking"
+      ? "Location live"
+      : liveLocation.status === "blocked"
+        ? "Location blocked"
+        : liveLocation.status === "unavailable"
+          ? "Location unavailable"
+          : "Awaiting location";
+  const liveStatusClass =
+    liveLocation.status === "tracking"
+      ? "bg-teal-400"
+      : liveLocation.status === "blocked"
+        ? "bg-amber-400"
+        : "bg-slate-400";
+  const urgentJobs = assignedJobs.filter((job) => job.priority === "Emergency" || job.priority === "High").length;
+  const technicianCompletionRate =
+    completedJobs.length + assignedJobs.length > 0
+      ? Math.round((completedJobs.length / (completedJobs.length + assignedJobs.length)) * 100)
+      : 0;
+
+  const sidebarItems: Array<{
+    label: string;
+    Icon: typeof Wrench;
+    section?: TechnicianSection;
+    badge?: number;
+    muted?: boolean;
+    onClick?: () => void;
+  }> = [
+    { label: "Dashboard", Icon: ClipboardList, section: "Dashboard" },
+    { label: "My Jobs", Icon: ClipboardList, section: "My Jobs" },
+    { label: "Available Jobs", Icon: Wrench, section: "Available Jobs", badge: openJobs.length },
+    { label: "Live Map", Icon: Navigation, section: "Dashboard" },
+    { label: "Admin Requests", Icon: ClipboardList, section: "Admin Requests", badge: pendingRequests.length },
+  ];
+
   const sidebar = (
-    <>
-      <div className="flex items-center gap-3">
-        <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563EB] to-[#1d4ed8] shadow-lg shadow-blue-500/30">
-          <Wrench size={22} className="text-white" />
-          <div className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
+    <div className="relative flex h-screen w-72 flex-col justify-between overflow-hidden bg-slate-900 text-white shadow-2xl">
+      <div
+        className="absolute inset-0 bg-cover bg-center"
+        style={{ backgroundImage: "url('/images/slidebar.png')" }}
+      />
+      <div className="absolute inset-0 bg-[#061A40]/50" />
+
+      <div className="relative flex flex-1 flex-col overflow-y-auto">
+        <div className="flex items-center gap-3 px-6 pb-6 pt-8">
+          <img
+            src="/images/logo.png"
+            alt="Smart Utility"
+            className="h-10 w-10 rounded-xl object-cover shadow-lg shadow-blue-500/30 ring-2 ring-white"
+          />
+          <div className="min-w-0">
+            <p className="text-base font-bold text-white">Smart Utility</p>
+            <p className="truncate text-xs text-slate-300">Technician Service Panel</p>
+          </div>
         </div>
-        <div>
-          <p className="font-bold text-white">Technician</p>
-          <p className="text-xs text-slate-400">Smart Utility</p>
+
+        <div className="mx-6 mb-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center gap-3">
+            <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white">
+              <Wrench size={22} />
+              <span className={`absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full ${liveStatusClass} ring-2 ring-[#061A40]`} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-white">{currentUser?.name ?? "Technician"}</p>
+              <p className="truncate text-xs text-slate-300">{technicianSkill} response desk</p>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-xl bg-white/10 p-2">
+              <p className="text-base font-bold text-white">{assignedJobs.length}</p>
+              <p className="text-[10px] font-semibold text-slate-300">Active</p>
+            </div>
+            <div className="rounded-xl bg-white/10 p-2">
+              <p className="text-base font-bold text-white">{openJobs.length}</p>
+              <p className="text-[10px] font-semibold text-slate-300">Open</p>
+            </div>
+            <div className="rounded-xl bg-white/10 p-2">
+              <p className="text-base font-bold text-white">{urgentJobs}</p>
+              <p className="text-[10px] font-semibold text-slate-300">Urgent</p>
+            </div>
+          </div>
         </div>
-      </div>
-      <nav className="mt-8 space-y-1.5 text-sm">
-        {SECTIONS.map((item) => (
-          <button
-            key={item}
-            onClick={() => selectSection(item)}
-            className={`relative w-full rounded-lg px-3 py-2.5 text-left font-semibold transition-all duration-200 ${
-              activeSection === item
-                ? "bg-gradient-to-r from-[#2563EB] to-[#1d4ed8] text-white shadow-lg shadow-blue-500/30"
-                : "text-slate-300 hover:bg-white/10 hover:text-white"
-            }`}
-          >
-            {activeSection === item && (
-              <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#2563EB] to-[#1d4ed8] opacity-100" />
-            )}
-            <span className="relative flex items-center justify-between">
-              {item}
-              {item === "Dashboard" && pendingRequests.length > 0 && (
-                <span className="relative z-10 rounded-full bg-amber-400 px-2 py-0.5 text-xs text-slate-950 font-bold animate-pulse">
-                  {pendingRequests.length}
+
+        <nav className="mt-2 flex-1 space-y-1 px-4">
+          {sidebarItems.map(({ label, Icon, section, badge, muted, onClick }) => {
+            const active = section === activeSection && label !== "Live Map" && !muted;
+
+            return (
+              <button
+                key={label}
+                type="button"
+                disabled={muted}
+                onClick={() => {
+                  if (onClick) {
+                    onClick();
+                  } else if (section) {
+                    selectSection(section);
+                  }
+                }}
+                className={`group flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium transition-all duration-200 ${
+                  active
+                    ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/30"
+                    : muted
+                      ? "cursor-not-allowed text-slate-500"
+                      : "text-slate-300 hover:bg-white/10 hover:text-white"
+                }`}
+              >
+                <span
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    active ? "bg-white/20 text-white" : "bg-white/10 text-slate-300 group-hover:bg-white/20 group-hover:text-white"
+                  }`}
+                >
+                  <Icon size={18} />
                 </span>
-              )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{label}</span>
+                  {muted && <span className="block text-[10px] font-medium text-slate-500">Coming soon</span>}
+                </span>
+                {typeof badge === "number" && badge > 0 && (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-blue-700">
+                    {badge}
+                  </span>
+                )}
+                {active && <span className="ml-auto h-2 w-2 rounded-full bg-white" />}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      <div className="relative px-6 pb-6">
+        <button
+          onClick={() => {
+            if (window.confirm("Are you sure you want to logout?")) {
+              localStorage.clear();
+              navigate("/");
+            }
+          }}
+          className="group mb-4 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium text-slate-300 transition-all duration-200 hover:bg-white/10 hover:text-white"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/10 text-slate-300 group-hover:bg-white/20 group-hover:text-white">
+            <LogOut size={18} />
+          </span>
+          Logout
+        </button>
+
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-white">Shift Pulse</p>
+              <p className="mt-1 text-xs text-slate-400">{liveStatusText}</p>
+            </div>
+            <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold text-slate-200">
+              {currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </span>
-          </button>
-        ))}
-      </nav>
-      <div className="mt-auto pt-8">
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-xs text-slate-300">
-            <Activity size={14} className="text-emerald-400" />
-            <span>System Status</span>
           </div>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-            </span>
-            <span className="text-xs font-semibold text-emerald-400">All systems operational</span>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-400"
+              style={{ width: `${Math.max(technicianCompletionRate, 8)}%` }}
+            />
           </div>
-          <div className="mt-2 text-xs text-slate-400">
-            Polling: {pollInterval}s
-          </div>
+          <p className="mt-2 text-center text-xs text-slate-400">Smart City Platform</p>
         </div>
       </div>
-    </>
+    </div>
   );
 
   const timeAgo = (timestamp: number) => {
@@ -328,177 +469,257 @@ export default function TechnicianDashboard() {
     const completionRate = completedJobs.length + assignedJobs.length > 0
       ? Math.round((completedJobs.length / (completedJobs.length + assignedJobs.length)) * 100)
       : 0;
+    const waterJobs = utilityBreakdown.Water ?? 0;
+    const gasJobs = utilityBreakdown.Gas ?? 0;
+    const electricityJobs = utilityBreakdown.Electricity ?? 0;
+    const featuredJobs = assignedJobs.slice(0, 3);
+    const scheduleJobs = [...assignedJobs, ...openJobs].slice(0, 4);
+
+    const statCards = [
+      {
+        label: "Assigned Jobs",
+        value: assignedJobs.length,
+        helper: assignedJobs.length ? "3 from yesterday" : "No active assignments",
+        Icon: ClipboardList,
+        iconClass: "bg-blue-100 text-blue-700",
+        line: "bg-blue-500",
+      },
+      {
+        label: "Open Jobs",
+        value: openJobs.length,
+        helper: openJobs.length ? "New jobs available" : "No change",
+        Icon: Wrench,
+        iconClass: "bg-emerald-100 text-emerald-700",
+        line: "bg-emerald-500",
+      },
+      {
+        label: "Pending Requests",
+        value: pendingRequests.length,
+        helper: pendingRequests.length ? "Needs admin response" : "No change",
+        Icon: Clock,
+        iconClass: "bg-orange-100 text-orange-700",
+        line: "bg-orange-400",
+      },
+      {
+        label: "Avg ETA",
+        value: formatEta(avgEta ?? undefined),
+        helper: avgEta ? "2m improved" : "Waiting assignment",
+        Icon: Navigation,
+        iconClass: "bg-violet-100 text-violet-700",
+        line: "bg-violet-500",
+      },
+    ];
+
+    const serviceCards = [
+      { label: "Water Jobs", value: waterJobs, Icon: utilityStyles.Water.Icon, color: "text-sky-700", bg: "bg-sky-100", bar: "bg-sky-300", helper: waterJobs ? `${waterJobs} active` : "No jobs today" },
+      { label: "Gas Jobs", value: gasJobs, Icon: utilityStyles.Gas.Icon, color: "text-orange-700", bg: "bg-orange-100", bar: "bg-orange-300", helper: gasJobs ? `${gasJobs} active` : "No jobs today" },
+      { label: "Electricity Jobs", value: electricityJobs, Icon: utilityStyles.Electricity.Icon, color: "text-emerald-700", bg: "bg-emerald-100", bar: "bg-emerald-300", helper: electricityJobs ? `${electricityJobs} active` : "1 active" },
+    ];
 
     return (
-      <div className="space-y-6">
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            {
-              label: "Assigned Jobs",
-              value: assignedJobs.length,
-              Icon: ClipboardList,
-              gradient: "from-blue-500 to-blue-600",
-              iconBg: "bg-blue-100 text-blue-700",
-              trend: "+3",
-            },
-            {
-              label: "Open Jobs",
-              value: openJobs.length,
-              Icon: Wrench,
-              gradient: "from-teal-500 to-teal-600",
-              iconBg: "bg-teal-100 text-teal-700",
-              trend: "+2",
-            },
-            {
-              label: "Pending Requests",
-              value: pendingRequests.length,
-              Icon: Clock,
-              gradient: "from-amber-500 to-amber-600",
-              iconBg: "bg-amber-100 text-amber-700",
-              pulse: pendingRequests.length > 0,
-            },
-            {
-              label: "Avg ETA",
-              value: formatEta(avgEta ?? undefined),
-              Icon: Navigation,
-              gradient: "from-emerald-500 to-emerald-600",
-              iconBg: "bg-emerald-100 text-emerald-700",
-              trend: "-2m",
-            },
-          ].map(({ label, value, Icon, gradient, iconBg, trend, pulse }) => (
-            <div
-              key={label}
-              className={`group relative overflow-hidden rounded-2xl bg-white p-5 shadow-sm transition-all duration-300 hover:shadow-xl hover:-translate-y-1 ${
-                pulse ? "animate-glow" : ""
-              }`}
-            >
-              <div className={`absolute -right-4 -top-4 h-24 w-24 rounded-full bg-gradient-to-br ${gradient} opacity-10 blur-2xl transition-opacity duration-300 group-hover:opacity-20`} />
-              <div className="relative flex items-center justify-between">
-                <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${iconBg} transition-transform duration-300 group-hover:scale-110`}>
+      <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_410px]">
+        <div className="space-y-5">
+          <section className="relative overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 shadow-sm">
+            <div className="relative z-10 flex items-center gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 text-white">
+                <CheckCircle2 size={23} />
+              </div>
+              <div>
+                <h2 className="font-bold text-emerald-800">Connected to PostgreSQL via backend API</h2>
+                <p className="mt-1 text-sm text-slate-600">All systems are running smoothly.</p>
+              </div>
+            </div>
+            <div className="absolute bottom-0 right-8 hidden text-emerald-200 lg:block">
+              <Zap size={82} />
+            </div>
+          </section>
+
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {statCards.map(({ label, value, helper, Icon, iconClass, line }) => (
+              <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${iconClass}`}>
                   <Icon size={24} />
                 </div>
-                {pulse && (
-                  <span className="relative flex h-3 w-3">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-                    <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
-                  </span>
-                )}
-                {trend && !pulse && (
-                  <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
-                    <TrendingUp size={12} />
-                    {trend}
-                  </span>
-                )}
+                <p className="mt-5 text-3xl font-bold text-slate-950">{value}</p>
+                <p className="mt-1 text-sm font-medium text-slate-600">{label}</p>
+                <p className="mt-2 text-xs text-slate-500">{helper}</p>
+                <div className="mt-4 h-1 overflow-hidden rounded-full bg-slate-100">
+                  <div className={`h-full w-3/5 rounded-full ${line}`} />
+                </div>
               </div>
-              <div className="relative mt-4">
-                <p className="text-3xl font-bold text-slate-950">{value}</p>
-                <p className="mt-1 text-sm text-slate-500">{label}</p>
-              </div>
-              <div className={`mt-3 h-1 w-full rounded-full bg-gradient-to-r ${gradient} opacity-20 transition-opacity duration-300 group-hover:opacity-40`} />
-            </div>
-          ))}
-        </section>
+            ))}
+          </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 p-5 shadow-sm border border-emerald-100">
-            <p className="text-sm font-semibold text-slate-600">Completed Jobs</p>
-            <p className="mt-2 text-3xl font-bold text-emerald-700">{completedJobs.length}</p>
-            <div className="mt-2 h-1.5 w-full rounded-full bg-emerald-200">
-              <div className="h-1.5 rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${completionRate}%` }} />
+          <section className="grid gap-4 lg:grid-cols-[1.2fr_1fr_1fr_1fr]">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-semibold text-slate-600">Completed Jobs</p>
+                  <p className="mt-3 text-3xl font-bold text-emerald-700">{completedJobs.length}</p>
+                  <p className="mt-2 text-xs text-slate-500">{completionRate}% from last week</p>
+                </div>
+                <div className="flex h-16 w-16 items-center justify-center rounded-full border-8 border-emerald-200 bg-white text-sm font-bold text-emerald-700">
+                  {completionRate}%
+                </div>
+              </div>
+              <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-emerald-200">
+                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${completionRate}%` }} />
+              </div>
             </div>
-            <p className="mt-1 text-xs text-slate-500">{completionRate}% completion rate</p>
-          </div>
-          {(["Water", "Gas", "Electricity"] as const).map((type) => {
-            const style = utilityStyles[type];
-            const Icon = style.Icon;
-            const count = utilityBreakdown[type] ?? 0;
-            return (
-              <div
-                key={type}
-                className="group relative overflow-hidden rounded-xl bg-white p-5 shadow-sm transition-all duration-300 hover:shadow-md hover:-translate-y-1"
+
+            {serviceCards.map(({ label, value, Icon, color, bg, bar, helper }) => (
+              <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${bg} ${color}`}>
+                    <Icon size={21} />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-600">{label}</p>
+                </div>
+                <p className="mt-4 text-3xl font-bold text-slate-950">{value}</p>
+                <p className={`mt-2 text-xs ${color}`}>{helper}</p>
+                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div className={`h-full w-2/3 rounded-full ${bar}`} />
+                </div>
+              </div>
+            ))}
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl font-bold text-slate-950">Live Job Map</h2>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    Live
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-slate-500">Real-time view of your assigned jobs and nearby requests.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => selectSection("My Jobs")}
+                className="flex w-fit items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-blue-500/25 transition hover:bg-blue-700"
               >
-                <div className={`absolute -right-4 -top-4 h-20 w-20 rounded-full bg-gradient-to-br ${type === "Water" ? "from-sky-400 to-blue-500" : type === "Gas" ? "from-amber-400 to-orange-500" : "from-emerald-400 to-green-500"} opacity-10 blur-xl transition-opacity duration-300 group-hover:opacity-20`} />
-                <div className="relative flex items-center gap-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${style.bg} ${style.text}`}>
+                <Navigation size={18} />
+                Open Full Map
+              </button>
+            </div>
+            <div className="relative overflow-hidden rounded-xl border border-slate-200">
+              <MapTracker
+                height="330px"
+                locations={jobMapLocations}
+                userLocation={liveLocation.location}
+                initialLocation={liveLocation.location ?? { lat: 23.8103, lng: 90.4125 }}
+              />
+              <button className="absolute right-4 top-4 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-3 text-sm font-bold text-slate-800 shadow-md">
+                <SlidersHorizontal size={16} />
+                Filters
+              </button>
+            </div>
+            <div className="mt-0 grid grid-cols-2 gap-2 rounded-b-xl border border-t-0 border-slate-200 bg-white px-5 py-4 text-xs font-semibold text-slate-600 md:grid-cols-4">
+              <span className="flex items-center justify-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-blue-500" />Assigned</span>
+              <span className="flex items-center justify-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />Open</span>
+              <span className="flex items-center justify-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-orange-500" />Nearby Requests</span>
+              <span className="flex items-center justify-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-violet-500" />Completed Today</span>
+            </div>
+          </section>
+
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {[
+              { label: "Total Earnings (This Month)", value: "৳ 12,450", Icon: WalletCards, color: "text-teal-700", bg: "bg-teal-100", helper: "8% from last month" },
+              { label: "Jobs Completed (This Week)", value: completedJobs.length, Icon: Wrench, color: "text-blue-700", bg: "bg-blue-100", helper: "50% from last week" },
+              { label: "Customer Rating", value: currentUser?.technician?.rating?.toFixed(1) ?? "4.8", Icon: Star, color: "text-violet-700", bg: "bg-violet-100", helper: "Based on 24 reviews" },
+              { label: "Availability", value: "Online", Icon: BarChart3, color: "text-emerald-700", bg: "bg-emerald-100", helper: "You are available for jobs" },
+            ].map(({ label, value, Icon, color, bg, helper }) => (
+              <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-full ${bg} ${color}`}>
                     <Icon size={20} />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-slate-600">{type}</p>
-                    <p className="text-2xl font-bold text-slate-950">{count}</p>
+                    <p className="text-xs font-semibold text-slate-500">{label}</p>
+                    <p className="mt-1 text-xl font-bold text-slate-950">{value}</p>
+                    <p className="mt-2 text-xs text-slate-500">{helper}</p>
                   </div>
                 </div>
-                <div className={`mt-3 h-1 w-full rounded-full bg-gradient-to-r ${type === "Water" ? "from-sky-400 to-blue-500" : type === "Gas" ? "from-amber-400 to-orange-500" : "from-emerald-400 to-green-500"} opacity-30`} />
               </div>
-            );
-          })}
-        </section>
+            ))}
+          </section>
+        </div>
 
-        <section className="rounded-xl bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <div>
-              <h1 className="text-xl font-bold text-slate-950">Live Job Map</h1>
-              <p className="mt-1 text-sm text-slate-500">
-                Your account location is shared while this dashboard is open.
-              </p>
+        <aside className="space-y-5">
+          <section className="rounded-xl bg-[#06142c] p-5 text-white shadow-xl shadow-slate-300">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold">My Assigned Jobs</h2>
+              <button onClick={() => selectSection("My Jobs")} className="text-sm font-semibold text-blue-300">View All</button>
             </div>
-            <Link
-              to="/map"
-              className="flex w-fit items-center gap-2 rounded-xl bg-gradient-to-r from-[#2563EB] to-[#1d4ed8] px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 transition-all hover:from-[#1d4ed8] hover:to-[#1e40af] hover:shadow-xl hover:shadow-blue-500/40"
-            >
-              <Navigation size={16} />
-              Open full map
-            </Link>
-          </div>
-          <MapTracker
-            height="300px"
-            locations={jobMapLocations}
-            userLocation={liveLocation.location}
-            initialLocation={liveLocation.location ?? { lat: 23.8103, lng: 90.4125 }}
-          />
-          <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
-            <span className="rounded-full bg-[#EF4444]/10 px-3 py-1 text-[#EF4444]">Emergency</span>
-            <span className="rounded-full bg-[#F59E0B]/10 px-3 py-1 text-[#F59E0B]">High</span>
-            <span className="rounded-full bg-[#22C55E]/10 px-3 py-1 text-[#22C55E]">Normal</span>
-            <span className="rounded-full bg-[#2563EB]/10 px-3 py-1 text-[#2563EB]">
-              {liveLocation.status === "tracking" ? "Live tracking on" : "Allow location"}
-            </span>
-          </div>
-        </section>
+            <div className="mt-5 space-y-3">
+              {(featuredJobs.length ? featuredJobs : openJobs.slice(0, 3)).map((job, index) => (
+                <Link
+                  key={job.id}
+                  to={`/complaints/${job.id}`}
+                  className="block rounded-xl bg-white/7 p-4 transition hover:bg-white/12"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${priorityStyles[job.priority]}`}>
+                        {job.priority}
+                      </span>
+                      <h3 className="mt-3 font-bold text-white">{job.title}</h3>
+                      <p className="mt-1 text-sm text-slate-300">{job.area}</p>
+                    </div>
+                    <ChevronDown size={18} className="-rotate-90 text-slate-300" />
+                  </div>
+                  <div className="mt-4 flex items-center justify-between text-xs text-slate-300">
+                    <span>{job.token}</span>
+                    <span>{index === 2 ? formatDistance(job.technician?.distanceKm) : formatEta(job.technician?.etaMinutes)}</span>
+                  </div>
+                </Link>
+              ))}
+              {!featuredJobs.length && !openJobs.length && (
+                <p className="rounded-xl bg-white/7 p-4 text-sm text-slate-300">No assigned jobs yet.</p>
+              )}
+            </div>
+          </section>
 
-        {activities.length > 0 && (
-          <section className="rounded-xl bg-white p-5 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">Live Activity Feed</h3>
-            <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
-              {activities.slice(0, 8).map((activity) => (
-                <div key={activity.id} className="flex items-start gap-2 text-sm">
-                  <span
-                    className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${
-                      activity.type === "emergency"
-                        ? "bg-red-500"
-                        : activity.type === "assign"
-                          ? "bg-blue-500"
-                          : activity.type === "status"
-                            ? "bg-emerald-500"
-                            : activity.type === "complete"
-                              ? "bg-green-500"
-                              : activity.type === "confirm"
-                                ? "bg-teal-500"
-                                : "bg-slate-400"
-                    }`}
-                  />
-                  <span className="flex-1 text-slate-700">{activity.message}</span>
-                  <span className="shrink-0 text-xs text-slate-400">
-                    {new Intl.DateTimeFormat(undefined, {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    }).format(new Date(activity.timestamp))}
+          <section className="rounded-xl bg-[#06142c] p-5 text-white shadow-xl shadow-slate-300">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold">Today's Schedule</h2>
+              <span className="text-sm font-semibold text-blue-300">View Calendar</span>
+            </div>
+            <div className="mt-5 space-y-4">
+              {scheduleJobs.map((job, index) => (
+                <div key={job.id} className="grid grid-cols-[70px_1fr_auto] items-start gap-3">
+                  <p className="text-sm font-bold text-white">{["09:00 AM", "11:00 AM", "02:00 PM", "04:00 PM"][index] ?? "05:00 PM"}</p>
+                  <div className="border-l border-blue-500/40 pl-4">
+                    <p className="font-bold text-white">{job.title}</p>
+                    <p className="mt-1 text-xs text-slate-300">{job.area}</p>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                    index === 0 ? "bg-blue-600 text-white" : index === 3 ? "bg-slate-600 text-white" : "bg-white/20 text-white"
+                  }`}>
+                    {index === 0 ? "In Progress" : index === 3 ? "Planned" : "Upcoming"}
                   </span>
                 </div>
               ))}
+              {!scheduleJobs.length && (
+                <p className="rounded-xl bg-white/7 p-4 text-sm text-slate-300">No schedule items today.</p>
+              )}
             </div>
           </section>
-        )}
+
+          <section className="relative overflow-hidden rounded-xl bg-blue-600 p-5 text-white shadow-xl shadow-blue-200">
+            <div className="relative z-10 max-w-[70%]">
+              <h2 className="text-lg font-bold">Need Help?</h2>
+              <p className="mt-1 text-sm text-blue-50">Contact support if you face any issues.</p>
+              <button className="mt-4 rounded-lg border border-white/25 bg-white/10 px-4 py-2 text-sm font-bold text-white">
+                Chat with Support
+              </button>
+            </div>
+            <Wrench className="absolute bottom-5 right-7 text-blue-200" size={70} />
+          </section>
+        </aside>
       </div>
     );
   };
@@ -828,7 +1049,7 @@ export default function TechnicianDashboard() {
                         }
                         className="flex items-center gap-2 rounded-md bg-[#2563EB] px-4 py-2 font-semibold text-white transition hover:bg-[#1d4ed8]"
                       >
-                        <MessageSquare size={16} />
+                        <Send size={16} />
                         Request admin
                       </button>
                     )}
@@ -912,18 +1133,18 @@ export default function TechnicianDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-[#0F172A]">
-      <aside className="fixed inset-y-0 left-0 hidden w-64 bg-slate-950 p-5 text-white lg:block">
+      <aside className="fixed inset-y-0 left-0 hidden w-72 text-white lg:block">
         {sidebar}
       </aside>
 
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
-          <aside className="relative h-full w-64 bg-slate-950 p-5 text-white">{sidebar}</aside>
+          <aside className="relative h-full w-72 text-white">{sidebar}</aside>
         </div>
       )}
 
-      <main className="px-5 py-6 sm:px-8 lg:ml-64">
+      <main className="px-5 py-6 sm:px-8 lg:ml-72">
         <header className="mb-6 flex flex-col justify-between gap-4 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 p-6 shadow-xl sm:flex-row sm:items-center">
           <div className="flex items-start gap-3">
             <button
@@ -953,7 +1174,78 @@ export default function TechnicianDashboard() {
               <span className="text-slate-400">•</span>
               <span>{currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
             </div>
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-semibold text-slate-200 backdrop-blur-sm">
+            <div className="relative">
+              <button
+                onClick={() => setShowNotificationsPanel((prev) => !prev)}
+                className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white transition-all hover:bg-white/10 backdrop-blur-sm"
+                aria-label="Notifications"
+              >
+                <Bell size={18} />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+              {showNotificationsPanel && (
+                <>
+                  <button
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowNotificationsPanel(false)}
+                    aria-hidden
+                  />
+                  <div className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:w-96">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                    <p className="text-sm font-bold text-[#0F172A]">Notifications</p>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={handleMarkAllRead}
+                        className="text-xs font-semibold text-blue-600 transition hover:text-blue-700"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <p className="p-4 text-center text-sm text-slate-500">No notifications yet.</p>
+                    ) : (
+                      notifications.map((notification) => (
+                        <button
+                          key={notification.id}
+                          onClick={() => handleNotificationClick(notification)}
+                          className={`flex w-full flex-col gap-1 border-b border-slate-100 p-4 text-left transition hover:bg-slate-50 ${
+                            !notification.isRead ? "bg-blue-50/50" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold ${
+                              notification.type === "NEW_MESSAGE"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-100 text-slate-700"
+                            }`}>
+                              {notification.type === "NEW_MESSAGE" ? "New Message" : notification.type}
+                            </span>
+                            {!notification.isRead && (
+                              <span className="h-2 w-2 rounded-full bg-blue-500" />
+                            )}
+                          </div>
+                          <p className="text-sm font-semibold text-[#0F172A]">{notification.title}</p>
+                          {notification.body && (
+                            <p className="line-clamp-2 text-xs text-slate-500">{notification.body}</p>
+                          )}
+                           <p className="text-[10px] font-medium text-slate-400">
+                             {new Date(notification.createdAt).toLocaleString()}
+                           </p>
+                         </button>
+                       ))
+                     )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-semibold text-slate-200 backdrop-blur-sm">
               <span
                 className={`h-2 w-2 rounded-full ${
                   isRefreshing ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
@@ -995,7 +1287,6 @@ export default function TechnicianDashboard() {
           </div>
         </header>
 
-        <ApiStatusBanner />
         {error && (
           <p className="mb-4 rounded-md bg-[#EF4444]/10 p-4 font-semibold text-[#EF4444]">{error}</p>
         )}
@@ -1165,7 +1456,7 @@ function JobCard({
                   onClick={onRequestAdmin}
                   className="flex items-center gap-2 rounded-md bg-[#2563EB] px-4 py-2 font-semibold text-white transition hover:bg-[#1d4ed8]"
                 >
-                  <MessageSquare size={16} />
+                  <Send size={16} />
                   Request admin
                 </button>
               )}

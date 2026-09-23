@@ -1,5 +1,6 @@
 /// <reference types="google.maps" preserve="true" />
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { Component, type ReactNode, useState, useCallback, useEffect, useRef } from 'react';
+import { MapPin } from 'lucide-react';
 import {
   APIProvider,
   Map,
@@ -36,15 +37,50 @@ interface MapTrackerProps extends MapTrackerBaseProps {
   locations?: MapLocation[];
 }
 
+const MapFallback = ({ height, message = "Map unavailable" }: { height?: string; message?: string }) => (
+  <div style={{ height }} className="flex items-center justify-center rounded-lg bg-slate-100">
+    <div className="text-center">
+      <MapPin className="mx-auto mb-2 text-slate-400" size={32} />
+      <p className="text-xs font-semibold text-slate-600">{message}</p>
+      <p className="text-xs text-slate-500">The dashboard is still available.</p>
+    </div>
+  </div>
+);
+
+class MapErrorBoundary extends Component<
+  { children: ReactNode; height?: string },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("[MapTracker Error]", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <MapFallback height={this.props.height} />;
+    }
+
+    return this.props.children;
+  }
+}
+
 const MapWithMarkers = ({
   onLocationSelect,
   initialLocation = { lat: 28.6139, lng: 77.2090 },
   technicianLocation,
   userLocation,
-  technicianLocations = [],
-  locations = [],
+  technicianLocations,
+  locations,
   zoom = 12,
 }: MapTrackerProps) => {
+  const safeTechnicianLocations = Array.isArray(technicianLocations) ? technicianLocations : [];
+  const safeLocations = Array.isArray(locations) ? locations : [];
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedMarkerIndex, setSelectedMarkerIndex] = useState<number | null>(null);
   const [infoAnchor, setInfoAnchor] = useState<google.maps.marker.AdvancedMarkerElement | null>(null);
@@ -140,7 +176,7 @@ const MapWithMarkers = ({
         </AdvancedMarker>
       )}
 
-      {technicianLocations.map((technician) => (
+      {safeTechnicianLocations.map((technician) => (
         <AdvancedMarker
           key={technician.id}
           ref={(ref) => {
@@ -163,7 +199,7 @@ const MapWithMarkers = ({
         </AdvancedMarker>
       ))}
 
-      {locations.map((location, index) => (
+      {safeLocations.map((location, index) => (
         <AdvancedMarker
           key={index}
           ref={(ref) => {
@@ -197,10 +233,10 @@ const MapWithMarkers = ({
         >
           <div>
             <h3 className="font-semibold">
-              {technicianLocations.find((technician) => technician.id === selectedTechnicianId)?.name}
+              {safeTechnicianLocations.find((technician) => technician.id === selectedTechnicianId)?.name}
             </h3>
             <p className="text-sm text-slate-500">
-              {technicianLocations.find((technician) => technician.id === selectedTechnicianId)?.status ?? "Live location"}
+              {safeTechnicianLocations.find((technician) => technician.id === selectedTechnicianId)?.status ?? "Live location"}
             </p>
           </div>
         </InfoWindow>
@@ -215,12 +251,12 @@ const MapWithMarkers = ({
           }}
         >
           <div>
-            <h3 className="font-semibold">{locations[selectedMarkerIndex].label}</h3>
-            {locations[selectedMarkerIndex].severity && (
-              <p className="text-sm text-slate-500">{locations[selectedMarkerIndex].severity}</p>
+            <h3 className="font-semibold">{safeLocations[selectedMarkerIndex]?.label}</h3>
+            {safeLocations[selectedMarkerIndex]?.severity && (
+              <p className="text-sm text-slate-500">{safeLocations[selectedMarkerIndex]?.severity}</p>
             )}
-            {locations[selectedMarkerIndex].description && (
-              <p className="text-sm text-slate-500">{locations[selectedMarkerIndex].description}</p>
+            {safeLocations[selectedMarkerIndex]?.description && (
+              <p className="text-sm text-slate-500">{safeLocations[selectedMarkerIndex]?.description}</p>
             )}
           </div>
         </InfoWindow>
@@ -233,37 +269,50 @@ const MapTracker = (props: MapTrackerProps) => {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
   if (!apiKey) {
-    return (
-      <div style={{ height: props.height }} className="flex items-center justify-center bg-gray-100">
-        <p className="text-red-600">Google Maps API key not configured. Please set VITE_GOOGLE_MAPS_API_KEY in .env</p>
-      </div>
-    );
+    return <MapFallback height={props.height} message="Google Maps API key not configured" />;
   }
 
   return (
-    <div style={{ height: props.height }}>
-      <APIProvider
-        apiKey={apiKey}
-        libraries={['places']}
-        version="weekly"
-        language="en"
-        region="US"
-      >
-        <MapWithMarkersWrapper {...props} />
-      </APIProvider>
-    </div>
+    <MapErrorBoundary height={props.height}>
+      <div style={{ height: props.height }}>
+        <APIProvider
+          apiKey={apiKey}
+          libraries={['places', 'marker']}
+          version="weekly"
+          language="en"
+          region="US"
+        >
+          <MapWithMarkersWrapper {...props} />
+        </APIProvider>
+      </div>
+    </MapErrorBoundary>
   );
 };
 
 const MapWithMarkersWrapper = (props: MapTrackerProps) => {
   const isLoaded = useApiIsLoaded();
+  const [timedOut, setTimedOut] = useState(false);
 
-  if (!isLoaded) {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!isLoaded) {
+        setTimedOut(true);
+      }
+    }, 8000);
+
+    return () => clearTimeout(timer);
+  }, [isLoaded]);
+
+  if (!isLoaded && !timedOut) {
     return (
       <div className="flex items-center justify-center" style={{ height: props.height }}>
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
       </div>
     );
+  }
+
+  if (!isLoaded && timedOut) {
+    return <MapFallback height={props.height} message="Check your Google Maps API key" />;
   }
 
   return <MapWithMarkers {...props} />;

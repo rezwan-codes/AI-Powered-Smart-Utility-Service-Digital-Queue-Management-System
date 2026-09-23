@@ -78,11 +78,15 @@ router.get("/conversations", async (req, res, next) => {
         orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
       });
 
+      const activeCitizenIds = new Set(activeComplaints.map((c) => c.citizenId));
+      const activeComplaintMap = new Map(activeComplaints.map((c) => [c.citizenId, c]));
+      const filteredConversations = conversations.filter((c) => activeCitizenIds.has(c.citizenId));
+
       res.json({
-        conversations: conversations.map((conversation) =>
+        conversations: filteredConversations.map((conversation) =>
           toCitizenConversation(
             conversation,
-            activeComplaints.find((complaint) => complaint.citizenId === conversation.citizenId),
+            activeComplaintMap.get(conversation.citizenId) ?? null,
           ),
         ),
       });
@@ -115,6 +119,19 @@ router.post("/conversations", async (req, res, next) => {
 
     if (!technician) {
       return res.status(404).json({ message: "Technician not found" });
+    }
+
+    const activeAssignment = await prisma.complaint.findFirst({
+      where: {
+        citizenId: user.id,
+        technicianId,
+        status: { notIn: ["COMPLETED", "CANCELLED"] },
+      },
+      select: { id: true },
+    });
+
+    if (!activeAssignment) {
+      return res.status(403).json({ message: "You can only chat with technicians assigned to your active complaints" });
     }
 
     let conversation = await prisma.conversation.findFirst({
@@ -265,6 +282,12 @@ router.post("/conversations/:conversationId/messages", async (req, res, next) =>
 
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
+      include: {
+        technician: {
+          include: { user: true },
+        },
+        citizen: true,
+      },
     });
 
     if (!conversation) {
@@ -273,7 +296,7 @@ router.post("/conversations/:conversationId/messages", async (req, res, next) =>
 
     if (
       (user.role === "CITIZEN" && conversation.citizenId !== user.id) ||
-      (user.role === "TECHNICIAN" && conversation.technicianId !== user.technician.id)
+      (user.role === "TECHNICIAN" && conversation.technicianId !== user.technician?.id)
     ) {
       return res.status(403).json({ message: "You do not have access to this conversation" });
     }
@@ -291,6 +314,45 @@ router.post("/conversations/:conversationId/messages", async (req, res, next) =>
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
+
+    if (user.role === "CITIZEN") {
+      const technician = await prisma.technician.findUnique({
+        where: { id: conversation.technicianId },
+        select: { userId: true },
+      });
+
+      if (!technician) {
+        return res.status(404).json({ message: "Assigned technician not found" });
+      }
+
+      await prisma.notification.create({
+        data: {
+          recipientId: technician.userId,
+          recipientRole: "TECHNICIAN",
+          type: "NEW_MESSAGE",
+          title: "New message from citizen",
+          body: text.trim().slice(0, 200),
+          data: JSON.stringify({
+            conversationId: conversation.id,
+          }),
+        },
+      });
+    }
+
+    if (user.role === "TECHNICIAN") {
+      await prisma.notification.create({
+        data: {
+          recipientId: conversation.citizenId,
+          recipientRole: "CITIZEN",
+          type: "NEW_MESSAGE",
+          title: "New message from technician",
+          body: text.trim().slice(0, 200),
+          data: JSON.stringify({
+            conversationId: conversation.id,
+          }),
+        },
+      });
+    }
 
     res.status(201).json({
       message: {

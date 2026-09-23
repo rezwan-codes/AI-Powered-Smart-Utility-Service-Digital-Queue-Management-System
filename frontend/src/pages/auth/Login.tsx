@@ -124,9 +124,8 @@ export default function Login() {
   const navigate = useNavigate();
   const [apiConnected, setApiConnected] = useState<boolean | null>(null);
   const [activeIssue, setActiveIssue] = useState(0);
-  const [displayedWords, setDisplayedWords] = useState(0);
-  const [showCursor, setShowCursor] = useState(true);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
 
   useEffect(() => {
     healthService
@@ -143,16 +142,19 @@ export default function Login() {
   }, []);
 
   useEffect(() => {
-    if (displayedWords < headlineWords.length) {
-      const timeout = setTimeout(() => setDisplayedWords((w) => w + 1), 70);
-      return () => clearTimeout(timeout);
-    }
-  }, [displayedWords]);
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest("[data-login-dropdown]")) {
+        setLoginOpen(false);
+      }
+    };
 
-  useEffect(() => {
-    const blink = setInterval(() => setShowCursor((c) => !c), 530);
-    return () => clearInterval(blink);
-  }, []);
+    if (loginOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [loginOpen]);
 
   const active = liveIssues[activeIssue];
   const ActiveIcon = active.Icon;
@@ -231,6 +233,54 @@ export default function Login() {
                 Checking service
               </div>
             )}
+            <div className="relative">
+              <button
+                onClick={() => setLoginOpen((prev) => !prev)}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
+              >
+                Login
+              </button>
+              {loginOpen && (
+                <div data-login-dropdown className="absolute right-0 mt-2 w-56 overflow-hidden rounded-xl border border-white/10 bg-slate-950 shadow-2xl">
+                  <button
+                    onClick={() => {
+                      setLoginOpen(false);
+                      navigate("/user/login");
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-200 transition hover:bg-white/5 hover:text-white"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/20 text-sky-300">
+                      <LogIn size={16} />
+                    </span>
+                    Citizen Login
+                  </button>
+                  <button
+                    onClick={() => {
+                      setLoginOpen(false);
+                      navigate("/technician/login");
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-200 transition hover:bg-white/5 hover:text-white"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-300">
+                      <Wrench size={16} />
+                    </span>
+                    Technician Login
+                  </button>
+                  <button
+                    onClick={() => {
+                      setLoginOpen(false);
+                      navigate("/admin/login");
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-200 transition hover:bg-white/5 hover:text-white"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-500/20 text-slate-300">
+                      <UserCog size={16} />
+                    </span>
+                    Admin Login
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="hidden lg:flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 backdrop-blur-sm">
               <Timer size={16} className="text-sky-300" />
               {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -272,10 +322,7 @@ export default function Login() {
             <h1 className="animate-fade-in-up delay-100 max-w-3xl text-4xl font-bold leading-tight sm:text-5xl lg:text-6xl">
               <span className="block text-white">{getTimeGreeting()},</span>
               <span className="mt-3 block bg-gradient-to-r from-sky-300 via-white to-emerald-300 bg-clip-text text-transparent animate-gradient">
-                {headlineWords.slice(0, displayedWords).join(" ")}
-                {displayedWords < headlineWords.length && (
-                  <span className={`text-sky-300 ${showCursor ? "typing-cursor" : "opacity-0"}`} />
-                )}
+                {headlineWords.join(" ")}
               </span>
             </h1>
 

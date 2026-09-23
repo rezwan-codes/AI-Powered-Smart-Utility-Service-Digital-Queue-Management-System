@@ -4,8 +4,8 @@ import authRoutes from "./authRoutes.js";
 import chatRoutes from "./chatRoutes.js";
 import complaintRoutes from "./complaintRoutes.js";
 import technicianRoutes from "./technicianRoutes.js";
-
 import requestRoutes from "./requestRoutes.js";
+import notificationRoutes from "./notificationRoutes.js";
 
 const router = Router();
 
@@ -19,5 +19,6 @@ router.use("/complaints", complaintRoutes);
 router.use("/technicians", technicianRoutes);
 router.use("/requests", requestRoutes);
 router.use("/admin", adminRoutes);
+router.use("/notifications", notificationRoutes);
 
 export default router;

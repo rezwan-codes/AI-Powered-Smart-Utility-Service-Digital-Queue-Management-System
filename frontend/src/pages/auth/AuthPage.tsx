@@ -1,4 +1,5 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { motion } from "framer-motion";
 import {
   ArrowLeft,
   BriefcaseBusiness,
@@ -10,6 +11,7 @@ import {
   Mail,
   MapPin,
   Phone,
+  Shield,
   ShieldCheck,
   User,
   UserPlus,
@@ -18,9 +20,13 @@ import {
   CheckCircle2,
   XCircle,
   Zap,
+  ClipboardList,
+  Ticket,
+  Navigation,
 } from "lucide-react";
 import { useState, useMemo, useCallback } from "react";
 import { authService } from "../../services/authService";
+import { useAuth } from "../../context/AuthContext";
 
 type Role = "user" | "technician" | "admin";
 type Mode = "login" | "register";
@@ -136,6 +142,7 @@ function validatePhone(phone: string): boolean {
 export default function AuthPage() {
   const navigate = useNavigate();
   const params = useParams();
+  const { setSession } = useAuth();
   const role = normalizeRole(params.role);
   const mode = normalizeMode(params.mode);
   const content = roleContent[role];
@@ -300,10 +307,12 @@ export default function AuthPage() {
     setError("");
     setIsSubmitting(true);
     try {
-      await authService.login({
+      const data = await authService.login({
         email: content.demoEmail,
         password: content.demoPassword,
+        role: roleToStorage[role],
       });
+      setSession(data.user, data.token);
       localStorage.setItem("role", roleToStorage[role]);
       navigate(content.dashboardPath);
     } catch (requestError) {
@@ -344,7 +353,7 @@ export default function AuthPage() {
           return;
         }
 
-        await authService.register({
+        const data = await authService.register({
           name: formData.name,
           email: formData.email,
           password: formData.password,
@@ -353,11 +362,38 @@ export default function AuthPage() {
           skill: formData.skill as "water" | "gas" | "electricity",
           area: formData.area,
         });
+
+        if (data.requiresVerification) {
+          const accountPayload = {
+            name: formData.name,
+            email: data.email ?? formData.email,
+            phone: formData.phone,
+            role: roleToStorage[role],
+            nid: formData.nid,
+            area: formData.area,
+            skill: formData.skill,
+            experience: formData.experience,
+          };
+          const securityPayload = {
+            password: formData.password,
+            passwordStrength: passwordStrength.label,
+          };
+          localStorage.setItem("registrationAccount", JSON.stringify(accountPayload));
+          localStorage.setItem("registrationSecurity", JSON.stringify(securityPayload));
+          navigate(`/otp-verify?email=${encodeURIComponent(data.email ?? formData.email)}`);
+          return;
+        }
+
+        if (data.token) {
+          localStorage.setItem("smartUtilityToken", data.token);
+        }
       } else {
-        await authService.login({
+        const data = await authService.login({
           email: formData.email,
           password: formData.password,
+          role: roleToStorage[role],
         });
+        setSession(data.user, data.token);
       }
 
       localStorage.setItem("role", roleToStorage[role]);
@@ -383,722 +419,500 @@ export default function AuthPage() {
 
   const currentStepIndex = registrationSteps.findIndex((s) => s.key === registrationStep);
 
-  return (
-    <main className="min-h-screen bg-slate-100 px-5 py-6 text-slate-950 sm:px-8">
-      <div className="mx-auto max-w-6xl">
-        <Link
-          to="/"
-          className="mb-5 inline-flex items-center gap-2 rounded-md px-3 py-2 font-semibold text-slate-700 transition hover:bg-white"
-        >
-          <ArrowLeft size={18} />
-          Home
-        </Link>
+  const leftContent = (
+    <motion.div
+      initial={{ opacity: 0, x: -40 }}
+      whileInView={{ opacity: 1, x: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.7, ease: "easeOut" }}
+      className="relative flex h-full flex-col justify-between rounded-3xl bg-gradient-to-br from-[#061A40] via-[#0B1F5E] to-[#061A40] p-8 text-white lg:rounded-l-3xl lg:rounded-r-none lg:p-10"
+    >
+      <div
+        className="absolute inset-0 bg-cover bg-center opacity-90"
+        style={{ backgroundImage: "url('/images/login page.png')" }}
+      />
+      <div className="absolute inset-0 bg-gradient-to-br from-[#061A40]/30 via-[#0B1F5E]/30 to-[#061A40]/30" />
 
-        <section className="grid overflow-hidden rounded-lg bg-white shadow-sm lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="bg-slate-950 p-6 text-white sm:p-8">
-            <div className="flex h-12 w-12 items-center justify-center rounded-md bg-white text-slate-950">
-              <RoleIcon size={24} />
-            </div>
-            <h1 className="mt-6 text-3xl font-bold">
-              {content.title} {isRegister ? "Registration" : "Login"}
-            </h1>
-            <p className="mt-3 leading-7 text-slate-300">{content.subtitle}</p>
-
-            {isRegister && (
-              <div className="mt-8">
-                <div className="mb-4 flex items-center justify-between">
-                  {registrationSteps.map((step, index) => (
-                    <div key={step.key} className="flex flex-1 items-center">
-                      <div className="flex flex-col items-center">
-                        <div
-                          className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm font-bold transition-all ${
-                            index <= currentStepIndex
-                              ? "border-sky-400 bg-sky-500 text-white"
-                              : "border-slate-600 bg-slate-800 text-slate-400"
-                          }`}
-                        >
-                          {index + 1}
-                        </div>
-                        <p className="mt-1 text-xs font-semibold text-slate-300">{step.label}</p>
-                      </div>
-                      {index < registrationSteps.length - 1 && (
-                        <div className="mx-2 h-0.5 flex-1 bg-slate-700">
-                          <div
-                            className={`h-full transition-all duration-300 ${
-                              index < currentStepIndex ? "bg-sky-400" : "bg-slate-700"
-                            }`}
-                            style={{
-                              width: index < currentStepIndex ? "100%" : "0%",
-                            }}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-8 space-y-3">
-              {[
-                ["Digital token", "Automatic serial number after complaint submission."],
-                ["Live status", "Pending, processing, and completed updates."],
-                ["Fast response", "Nearest technician assignment and ETA tracking."],
-              ].map(([title, copy]) => (
-                <div key={title} className="rounded-md border border-white/10 bg-white/10 p-4">
-                  <p className="font-semibold">{title}</p>
-                  <p className="mt-1 text-sm text-slate-300">{copy}</p>
-                </div>
-              ))}
-            </div>
-
-            {!isRegister && (
-              <div className="mt-8 rounded-lg border border-sky-400/30 bg-sky-500/10 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <Zap size={18} className="text-sky-300" />
-                  <p className="text-sm font-semibold text-sky-100">Quick Demo Login</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleDemoLogin}
-                  disabled={isSubmitting}
-                  className="w-full rounded-md bg-sky-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isSubmitting ? "Logging in..." : `Login as ${content.title}`}
-                </button>
-                <p className="mt-2 text-xs text-slate-300">
-                  Demo: {content.demoEmail}
-                </p>
-              </div>
-            )}
+      <div className="relative">
+        <div className="flex items-center gap-3">
+          <img
+            src="/images/logo.png"
+            alt="Smart Utility"
+            className="h-12 w-12 rounded-xl object-cover shadow-lg shadow-blue-500/30 ring-2 ring-white"
+          />
+          <div>
+            <p className="text-lg font-bold text-white">Smart Utility</p>
+            <p className="text-xs text-slate-300">Digital Queue System</p>
           </div>
+        </div>
+      </div>
 
-          <div className="p-6 sm:p-8">
-            <div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+      <div className="relative mt-10">
+        <h2 className="text-3xl font-bold leading-tight lg:text-4xl">
+          <span className="block bg-gradient-to-r from-white to-blue-200 bg-clip-text text-transparent">
+            Welcome Back
+          </span>
+        </h2>
+        <p className="mt-4 text-sm leading-7 text-slate-200 lg:text-base">
+          Continue managing your utility services with one secure account. Submit complaints, receive digital queue tokens, track progress in real time, and stay connected with your assigned technician—all from one modern platform.
+        </p>
+
+        <div className="mt-8 grid gap-3 sm:grid-cols-1 lg:grid-cols-1">
+          {[
+            { title: "Digital Queue", copy: "Receive instant digital tokens.", Icon: Ticket },
+            { title: "Live Tracking", copy: "Track complaint progress anytime.", Icon: Navigation },
+            { title: "Fast & Secure", copy: "Reliable and secure platform for every citizen.", Icon: Shield },
+          ].map(({ title, copy, Icon }) => (
+            <div
+              key={title}
+              className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm transition-all hover:bg-white/10"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10">
+                  <Icon size={20} className="text-blue-300" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">{title}</p>
+                  <p className="text-xs text-slate-300">{copy}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="relative mt-8">
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-200 backdrop-blur-sm">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+          </span>
+          Trusted by Citizens Across Bangladesh
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  const rightContent = (
+    <motion.div
+      initial={{ opacity: 0, x: 40 }}
+      whileInView={{ opacity: 1, x: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.7, ease: "easeOut", delay: 0.1 }}
+      className="flex items-center justify-center rounded-3xl bg-white p-6 sm:p-8 lg:rounded-r-3xl lg:rounded-l-none lg:p-10"
+    >
+      <div className="w-full max-w-md">
+        <div className="mb-6">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            <ArrowLeft size={18} />
+            Back
+          </Link>
+        </div>
+
+        <div className="mb-8">
+          <p className="text-sm font-semibold uppercase tracking-wide text-sky-700">
+            {content.title} access
+          </p>
+          <h2 className="mt-2 text-3xl font-bold text-slate-900">
+            {isRegister ? "Create your account" : "Sign In"}
+          </h2>
+          <p className="mt-2 text-sm text-slate-500">
+            {isRegister
+              ? "Complete the steps to register your account."
+              : "Sign in to access your Smart Utility account."}
+          </p>
+        </div>
+
+        <form onSubmit={submitForm} className="space-y-5">
+          {isRegister && registrationStep === "basic" && (
+            <>
               <div>
-                <p className="text-sm font-semibold uppercase tracking-wide text-sky-700">
-                  {content.title} access
-                </p>
-                <h2 className="mt-1 text-2xl font-bold">
-                  {isRegister ? "Create your account" : "Sign in to continue"}
-                </h2>
-                {isRegister && (
-                  <p className="mt-1 text-sm text-slate-600">
-                    Step {currentStepIndex + 1} of {registrationSteps.length}:{" "}
-                    {registrationSteps[currentStepIndex]?.description}
+                <label className="block text-sm font-semibold text-slate-700">Full Name</label>
+                <div className="relative mt-2">
+                  <User className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <input
+                    name="name"
+                    required
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    placeholder="Your full name"
+                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+                {touched.name && errors.name && (
+                  <p className="mt-1 flex items-center gap-1 text-sm text-red-600">
+                    <XCircle size={14} /> {errors.name}
                   </p>
                 )}
               </div>
-              <Link
-                to={`/${role}/${isRegister ? "login" : "register"}`}
-                className="rounded-md bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Email Address</label>
+                <div className="relative mt-2">
+                  <Mail className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <input
+                    name="email"
+                    required
+                    type="email"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    placeholder="name@example.com"
+                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+                {touched.email && errors.email && (
+                  <p className="mt-1 flex items-center gap-1 text-sm text-red-600">
+                    <XCircle size={14} /> {errors.email}
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleNextStep}
+                disabled={!isStepValid("basic")}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 to-blue-600 px-5 py-3.5 font-semibold text-white shadow-lg shadow-sky-500/30 transition hover:shadow-xl hover:shadow-sky-500/40 hover:-translate-y-0.5 disabled:opacity-50"
               >
-                {isRegister ? "Already registered?" : "Need an account?"}
-              </Link>
-            </div>
+                Continue
+                <ArrowLeft size={18} className="rotate-180" />
+              </button>
+            </>
+          )}
 
-            <form onSubmit={submitForm} className="grid gap-4">
-              {isRegister && registrationStep === "basic" && (
-                <>
-                  <div className="relative">
-                    <label
-                      className={`block text-sm font-semibold transition-colors ${
-                        touched.name && errors.name
-                          ? "text-red-700"
-                          : touched.name && !errors.name
-                            ? "text-emerald-700"
-                            : "text-slate-700"
-                      }`}
+          {isRegister && registrationStep === "details" && (
+            <>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Phone Number</label>
+                <div className="relative mt-2">
+                  <Phone className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <input
+                    name="phone"
+                    required
+                    value={formData.phone}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    placeholder="+880 17XX-XXXXXX"
+                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+                {touched.phone && errors.phone && (
+                  <p className="mt-1 flex items-center gap-1 text-sm text-red-600">
+                    <XCircle size={14} /> {errors.phone}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">
+                  {role === "technician" ? "Technician ID" : role === "admin" ? "Authority ID" : "NID"}
+                </label>
+                <div className="relative mt-2">
+                  <IdCard className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <input
+                    name="nid"
+                    required
+                    value={formData.nid}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    placeholder={role === "user" ? "National ID" : "Official ID"}
+                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+                {touched.nid && errors.nid && (
+                  <p className="mt-1 flex items-center gap-1 text-sm text-red-600">
+                    <XCircle size={14} /> {errors.nid}
+                  </p>
+                )}
+              </div>
+
+              {role === "technician" && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700">Specialization</label>
+                    <select
+                      name="skill"
+                      required
+                      value={formData.skill}
+                      onChange={handleInputChange}
+                      onBlur={handleBlur}
+                      className="mt-2 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
                     >
-                      Full Name
-                    </label>
-                    <div
-                      className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                        touched.name && errors.name
-                          ? "border-red-400 validation-error"
-                          : touched.name && !errors.name
-                            ? "border-emerald-400 validation-success"
-                            : "border-slate-300 focus-within:border-sky-500"
-                      }`}
-                    >
-                      <User className="ml-3 mt-3 text-slate-400" size={20} />
+                      <option value="electricity">Electricity</option>
+                      <option value="water">Water</option>
+                      <option value="gas">Gas</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700">Experience</label>
+                    <div className="relative mt-2">
+                      <BriefcaseBusiness className="absolute left-3 top-3 text-slate-400" size={20} />
                       <input
-                        name="name"
+                        name="experience"
                         required
-                        value={formData.name}
+                        value={formData.experience}
                         onChange={handleInputChange}
                         onBlur={handleBlur}
-                        placeholder={role === "technician" ? "Technician name" : "Your name"}
-                        className="w-full rounded-md p-3 outline-none"
+                        placeholder="3 years"
+                        className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
                       />
-                      {touched.name && !errors.name && formData.name && (
-                        <CheckCircle2 className="mr-3 mt-3 text-emerald-500" size={20} />
-                      )}
-                      {touched.name && errors.name && (
-                        <AlertCircle className="mr-3 mt-3 text-red-500" size={20} />
-                      )}
                     </div>
-                    {touched.name && errors.name && (
-                      <p className="mt-1 flex items-center gap-1 text-sm text-red-600 animate-slide-down">
-                        <XCircle size={14} />
-                        {errors.name}
-                      </p>
-                    )}
                   </div>
+                </div>
+              )}
 
-                  <div className="relative">
-                    <label
-                      className={`block text-sm font-semibold transition-colors ${
-                        touched.email && errors.email
-                          ? "text-red-700"
-                          : touched.email && !errors.email
-                            ? "text-emerald-700"
-                            : "text-slate-700"
-                      }`}
-                    >
-                      Email Address
-                    </label>
-                    <div
-                      className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                        touched.email && errors.email
-                          ? "border-red-400 validation-error"
-                          : touched.email && !errors.email
-                            ? "border-emerald-400 validation-success"
-                            : "border-slate-300 focus-within:border-sky-500"
-                      }`}
-                    >
-                      <Mail className="ml-3 mt-3 text-slate-400" size={20} />
-                      <input
-                        name="email"
-                        required
-                        type="email"
-                        value={formData.email}
-                        onChange={handleInputChange}
-                        onBlur={handleBlur}
-                        placeholder="name@example.com"
-                        className="w-full rounded-md p-3 outline-none"
-                      />
-                      {touched.email && !errors.email && formData.email && (
-                        <CheckCircle2 className="mr-3 mt-3 text-emerald-500" size={20} />
-                      )}
-                      {touched.email && errors.email && (
-                        <AlertCircle className="mr-3 mt-3 text-red-500" size={20} />
-                      )}
-                    </div>
-                    {touched.email && errors.email && (
-                      <p className="mt-1 flex items-center gap-1 text-sm text-red-600 animate-slide-down">
-                        <XCircle size={14} />
-                        {errors.email}
-                      </p>
-                    )}
-                  </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Service Area</label>
+                <div className="relative mt-2">
+                  <MapPin className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <input
+                    name="area"
+                    required
+                    value={formData.area}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    placeholder="Dhanmondi, Mirpur, Uttara"
+                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+                {touched.area && errors.area && (
+                  <p className="mt-1 flex items-center gap-1 text-sm text-red-600">
+                    <XCircle size={14} /> {errors.area}
+                  </p>
+                )}
+              </div>
 
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handlePrevStep}
+                  className="flex items-center justify-center gap-2 rounded-2xl border-2 border-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  <ArrowLeft size={18} />
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNextStep}
+                  disabled={!isStepValid("details")}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 to-blue-600 px-5 py-3 font-semibold text-white shadow-lg shadow-sky-500/30 transition hover:shadow-xl disabled:opacity-50"
+                >
+                  Continue
+                  <ArrowLeft size={18} className="rotate-180" />
+                </button>
+              </div>
+            </>
+          )}
+
+          {isRegister && registrationStep === "security" && (
+            <>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Password</label>
+                <div className="relative mt-2">
+                  <Lock className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <input
+                    name="password"
+                    required
+                    type={showPassword ? "text" : "password"}
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    placeholder="Create a strong password"
+                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-12 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
                   <button
                     type="button"
-                    onClick={handleNextStep}
-                    disabled={!isStepValid("basic")}
-                    className="flex items-center justify-center gap-2 rounded-md bg-sky-600 px-5 py-3 font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => setShowPassword((current) => !current)}
+                    className="absolute right-3 top-3 text-slate-500 transition hover:text-slate-800"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                   >
-                    Continue
-                    <ArrowLeft size={18} className="rotate-180" />
+                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
-                </>
-              )}
-
-              {isRegister && registrationStep === "details" && (
-                <>
-                  <div className="relative">
-                    <label
-                      className={`block text-sm font-semibold transition-colors ${
-                        touched.phone && errors.phone
-                          ? "text-red-700"
-                          : touched.phone && !errors.phone
-                            ? "text-emerald-700"
-                            : "text-slate-700"
-                      }`}
-                    >
-                      Phone Number
-                    </label>
-                    <div
-                      className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                        touched.phone && errors.phone
-                          ? "border-red-400 validation-error"
-                          : touched.phone && !errors.phone
-                            ? "border-emerald-400 validation-success"
-                            : "border-slate-300 focus-within:border-sky-500"
-                      }`}
-                    >
-                      <Phone className="ml-3 mt-3 text-slate-400" size={20} />
-                      <input
-                        name="phone"
-                        required
-                        value={formData.phone}
-                        onChange={handleInputChange}
-                        onBlur={handleBlur}
-                        placeholder="+880 17XX-XXXXXX"
-                        className="w-full rounded-md p-3 outline-none"
+                </div>
+                {formData.password && (
+                  <div className="mt-2">
+                    <div className="mb-1 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className={`h-full rounded-full transition-all ${passwordStrength.color}`}
+                        style={{ width: `${(passwordStrength.score / 5) * 100}%` }}
                       />
-                      {touched.phone && !errors.phone && formData.phone && (
-                        <CheckCircle2 className="mr-3 mt-3 text-emerald-500" size={20} />
-                      )}
-                      {touched.phone && errors.phone && (
-                        <AlertCircle className="mr-3 mt-3 text-red-500" size={20} />
-                      )}
                     </div>
-                    {touched.phone && errors.phone && (
-                      <p className="mt-1 flex items-center gap-1 text-sm text-red-600 animate-slide-down">
-                        <XCircle size={14} />
-                        {errors.phone}
-                      </p>
-                    )}
+                    <p className="text-xs font-semibold text-slate-600">{passwordStrength.label}</p>
                   </div>
+                )}
+              </div>
 
-                  <div className="relative">
-                    <label
-                      className={`block text-sm font-semibold transition-colors ${
-                        touched.nid && errors.nid
-                          ? "text-red-700"
-                          : touched.nid && !errors.nid
-                            ? "text-emerald-700"
-                            : "text-slate-700"
-                      }`}
-                    >
-                      {role === "technician" ? "Technician ID" : role === "admin" ? "Authority ID" : "NID"}
-                    </label>
-                    <div
-                      className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                        touched.nid && errors.nid
-                          ? "border-red-400 validation-error"
-                          : touched.nid && !errors.nid
-                            ? "border-emerald-400 validation-success"
-                            : "border-slate-300 focus-within:border-sky-500"
-                      }`}
-                    >
-                      <IdCard className="ml-3 mt-3 text-slate-400" size={20} />
-                      <input
-                        name="nid"
-                        required
-                        value={formData.nid}
-                        onChange={handleInputChange}
-                        onBlur={handleBlur}
-                        placeholder={role === "user" ? "National ID" : "Official ID"}
-                        className="w-full rounded-md p-3 outline-none"
-                      />
-                      {touched.nid && !errors.nid && formData.nid && (
-                        <CheckCircle2 className="mr-3 mt-3 text-emerald-500" size={20} />
-                      )}
-                      {touched.nid && errors.nid && (
-                        <AlertCircle className="mr-3 mt-3 text-red-500" size={20} />
-                      )}
-                    </div>
-                    {touched.nid && errors.nid && (
-                      <p className="mt-1 flex items-center gap-1 text-sm text-red-600 animate-slide-down">
-                        <XCircle size={14} />
-                        {errors.nid}
-                      </p>
-                    )}
-                  </div>
-
-                  {role === "technician" && (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="relative">
-                        <label
-                          className={`block text-sm font-semibold transition-colors ${
-                            touched.skill && errors.skill
-                              ? "text-red-700"
-                              : "text-slate-700"
-                          }`}
-                        >
-                          Specialization
-                        </label>
-                        <select
-                          name="skill"
-                          required
-                          value={formData.skill}
-                          onChange={handleInputChange}
-                          onBlur={handleBlur}
-                          className="mt-2 w-full rounded-md border-2 border-slate-300 bg-white p-3 outline-none focus:border-sky-500"
-                        >
-                          <option value="electricity">Electricity</option>
-                          <option value="water">Water</option>
-                          <option value="gas">Gas</option>
-                        </select>
-                      </div>
-
-                      <div className="relative">
-                        <label
-                          className={`block text-sm font-semibold transition-colors ${
-                            touched.experience && errors.experience
-                              ? "text-red-700"
-                              : touched.experience && !errors.experience
-                                ? "text-emerald-700"
-                                : "text-slate-700"
-                          }`}
-                        >
-                          Experience
-                        </label>
-                        <div
-                          className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                            touched.experience && errors.experience
-                              ? "border-red-400 validation-error"
-                              : touched.experience && !errors.experience
-                                ? "border-emerald-400 validation-success"
-                                : "border-slate-300 focus-within:border-sky-500"
-                          }`}
-                        >
-                          <BriefcaseBusiness className="ml-3 mt-3 text-slate-400" size={20} />
-                          <input
-                            name="experience"
-                            required
-                            value={formData.experience}
-                            onChange={handleInputChange}
-                            onBlur={handleBlur}
-                            placeholder="3 years"
-                            className="w-full rounded-md p-3 outline-none"
-                          />
-                          {touched.experience && !errors.experience && formData.experience && (
-                            <CheckCircle2 className="mr-3 mt-3 text-emerald-500" size={20} />
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="relative">
-                    <label
-                      className={`block text-sm font-semibold transition-colors ${
-                        touched.area && errors.area
-                          ? "text-red-700"
-                          : touched.area && !errors.area
-                            ? "text-emerald-700"
-                            : "text-slate-700"
-                      }`}
-                    >
-                      Service Area
-                    </label>
-                    <div
-                      className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                        touched.area && errors.area
-                          ? "border-red-400 validation-error"
-                          : touched.area && !errors.area
-                            ? "border-emerald-400 validation-success"
-                            : "border-slate-300 focus-within:border-sky-500"
-                      }`}
-                    >
-                      <MapPin className="ml-3 mt-3 text-slate-400" size={20} />
-                      <input
-                        name="area"
-                        required
-                        value={formData.area}
-                        onChange={handleInputChange}
-                        onBlur={handleBlur}
-                        placeholder="Dhanmondi, Mirpur, Uttara"
-                        className="w-full rounded-md p-3 outline-none"
-                      />
-                      {touched.area && !errors.area && formData.area && (
-                        <CheckCircle2 className="mr-3 mt-3 text-emerald-500" size={20} />
-                      )}
-                      {touched.area && errors.area && (
-                        <AlertCircle className="mr-3 mt-3 text-red-500" size={20} />
-                      )}
-                    </div>
-                    {touched.area && errors.area && (
-                      <p className="mt-1 flex items-center gap-1 text-sm text-red-600 animate-slide-down">
-                        <XCircle size={14} />
-                        {errors.area}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={handlePrevStep}
-                      className="flex items-center justify-center gap-2 rounded-md border-2 border-slate-300 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
-                    >
-                      <ArrowLeft size={18} />
-                      Back
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleNextStep}
-                      disabled={!isStepValid("details")}
-                      className="flex flex-1 items-center justify-center gap-2 rounded-md bg-sky-600 px-5 py-3 font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Continue
-                      <ArrowLeft size={18} className="rotate-180" />
-                    </button>
-                  </div>
-                </>
-              )}
-
-              {isRegister && registrationStep === "security" && (
-                <>
-                  <div className="relative">
-                    <label
-                      className={`block text-sm font-semibold transition-colors ${
-                        touched.password && errors.password
-                          ? "text-red-700"
-                          : touched.password && !errors.password
-                            ? "text-emerald-700"
-                            : "text-slate-700"
-                      }`}
-                    >
-                      Password
-                    </label>
-                    <div
-                      className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                        touched.password && errors.password
-                          ? "border-red-400 validation-error"
-                          : touched.password && !errors.password
-                            ? "border-emerald-400 validation-success"
-                            : "border-slate-300 focus-within:border-sky-500"
-                      }`}
-                    >
-                      <Lock className="ml-3 mt-3 text-slate-400" size={20} />
-                      <input
-                        name="password"
-                        required
-                        type={showPassword ? "text" : "password"}
-                        value={formData.password}
-                        onChange={handleInputChange}
-                        onBlur={handleBlur}
-                        placeholder="Create a strong password"
-                        className="w-full rounded-md p-3 outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((current) => !current)}
-                        className="px-3 text-slate-500 transition hover:text-slate-800"
-                        aria-label={showPassword ? "Hide password" : "Show password"}
-                      >
-                        {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                      </button>
-                    </div>
-                    {formData.password && (
-                      <div className="mt-2 animate-scale-in">
-                        <div className="mb-1 flex items-center justify-between">
-                          <div className="flex-1 rounded-full bg-slate-200 h-2 overflow-hidden">
-                            <div
-                              className={`password-strength-bar h-full rounded-full ${passwordStrength.color}`}
-                              style={{ width: `${(passwordStrength.score / 5) * 100}%` }}
-                            />
-                          </div>
-                          <span className="ml-3 text-xs font-semibold text-slate-600">
-                            {passwordStrength.label}
-                          </span>
-                        </div>
-                        <div className="flex gap-2 text-xs text-slate-500">
-                          <span className={formData.password.length >= 8 ? "text-emerald-600 font-semibold" : ""}>
-                            • Length
-                          </span>
-                          <span className={/[A-Z]/.test(formData.password) && /[a-z]/.test(formData.password) ? "text-emerald-600 font-semibold" : ""}>
-                            • Mixed case
-                          </span>
-                          <span className={/\d/.test(formData.password) ? "text-emerald-600 font-semibold" : ""}>
-                            • Numbers
-                          </span>
-                          <span className={/[^a-zA-Z0-9]/.test(formData.password) ? "text-emerald-600 font-semibold" : ""}>
-                            • Symbols
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative">
-                    <label
-                      className={`block text-sm font-semibold transition-colors ${
-                        touched.confirmPassword && errors.confirmPassword
-                          ? "text-red-700"
-                          : touched.confirmPassword && !errors.confirmPassword
-                            ? "text-emerald-700"
-                            : "text-slate-700"
-                      }`}
-                    >
-                      Confirm Password
-                    </label>
-                    <div
-                      className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                        touched.confirmPassword && errors.confirmPassword
-                          ? "border-red-400 validation-error"
-                          : touched.confirmPassword && !errors.confirmPassword
-                            ? "border-emerald-400 validation-success"
-                            : "border-slate-300 focus-within:border-sky-500"
-                      }`}
-                    >
-                      <ShieldCheck className="ml-3 mt-3 text-slate-400" size={20} />
-                      <input
-                        name="confirmPassword"
-                        required
-                        type={showConfirmPassword ? "text" : "password"}
-                        value={formData.confirmPassword}
-                        onChange={handleInputChange}
-                        onBlur={handleBlur}
-                        placeholder="Confirm your password"
-                        className="w-full rounded-md p-3 outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword((current) => !current)}
-                        className="px-3 text-slate-500 transition hover:text-slate-800"
-                        aria-label={showConfirmPassword ? "Hide password" : "Show password"}
-                      >
-                        {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                      </button>
-                    </div>
-                    {touched.confirmPassword && errors.confirmPassword && (
-                      <p className="mt-1 flex items-center gap-1 text-sm text-red-600 animate-slide-down">
-                        <XCircle size={14} />
-                        {errors.confirmPassword}
-                      </p>
-                    )}
-                    {touched.confirmPassword && !errors.confirmPassword && formData.confirmPassword && (
-                      <p className="mt-1 flex items-center gap-1 text-sm text-emerald-600 animate-slide-down">
-                        <CheckCircle2 size={14} />
-                        Passwords match
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={handlePrevStep}
-                      className="flex items-center justify-center gap-2 rounded-md border-2 border-slate-300 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
-                    >
-                      <ArrowLeft size={18} />
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isSubmitting || !isStepValid("security")}
-                      className={`flex flex-1 items-center justify-center gap-2 rounded-md px-5 py-3 font-semibold text-white transition ${content.accent} disabled:opacity-50 disabled:cursor-not-allowed`}
-                    >
-                      {isSubmitting ? (
-                        "Please wait..."
-                      ) : (
-                        <>
-                          <UserPlus size={18} />
-                          Complete Registration
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </>
-              )}
-
-              {!isRegister && (
-                <>
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">Email Address</span>
-                    <div
-                      className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                        touched.email && errors.email
-                          ? "border-red-400 validation-error"
-                          : touched.email && !errors.email
-                            ? "border-emerald-400 validation-success"
-                            : "border-slate-300 focus-within:border-sky-500"
-                      }`}
-                    >
-                      <Mail className="ml-3 mt-3 text-slate-400" size={20} />
-                      <input
-                        name="email"
-                        required
-                        type="email"
-                        value={formData.email}
-                        onChange={handleInputChange}
-                        onBlur={handleBlur}
-                        defaultValue={content.demoEmail}
-                        placeholder="name@example.com"
-                        className="w-full rounded-md p-3 outline-none"
-                      />
-                      {touched.email && !errors.email && formData.email && (
-                        <CheckCircle2 className="mr-3 mt-3 text-emerald-500" size={20} />
-                      )}
-                    </div>
-                    {touched.email && errors.email && (
-                      <p className="mt-1 flex items-center gap-1 text-sm text-red-600 animate-slide-down">
-                        <XCircle size={14} />
-                        {errors.email}
-                      </p>
-                    )}
-                  </label>
-
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">Password</span>
-                    <div
-                      className={`mt-2 flex rounded-md border-2 bg-white transition-all ${
-                        touched.password && errors.password
-                          ? "border-red-400 validation-error"
-                          : touched.password && !errors.password
-                            ? "border-emerald-400 validation-success"
-                            : "border-slate-300 focus-within:border-sky-500"
-                      }`}
-                    >
-                      <Lock className="ml-3 mt-3 text-slate-400" size={20} />
-                      <input
-                        name="password"
-                        required
-                        type={showPassword ? "text" : "password"}
-                        value={formData.password}
-                        onChange={handleInputChange}
-                        onBlur={handleBlur}
-                        defaultValue={content.demoPassword}
-                        placeholder="Enter password"
-                        className="w-full p-3 outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((current) => !current)}
-                        className="px-3 text-slate-500 transition hover:text-slate-800"
-                        aria-label={showPassword ? "Hide password" : "Show password"}
-                      >
-                        {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                      </button>
-                    </div>
-                  </label>
-
-                  {error && (
-                    <div className="animate-scale-in rounded-md bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-                      {error}
-                    </div>
-                  )}
-
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Confirm Password</label>
+                <div className="relative mt-2">
+                  <ShieldCheck className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <input
+                    name="confirmPassword"
+                    required
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={formData.confirmPassword}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    placeholder="Confirm your password"
+                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-12 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
                   <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className={`mt-2 flex items-center justify-center gap-2 rounded-md px-5 py-3 font-semibold text-white transition ${content.accent} disabled:opacity-50`}
+                    type="button"
+                    onClick={() => setShowConfirmPassword((current) => !current)}
+                    className="absolute right-3 top-3 text-slate-500 transition hover:text-slate-800"
+                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                   >
-                    {isSubmitting ? (
-                      "Signing in..."
-                    ) : (
-                      <>
-                        <ShieldCheck size={18} />
-                        Sign in as {content.title}
-                      </>
-                    )}
+                    {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
-                </>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handlePrevStep}
+                  className="flex items-center justify-center gap-2 rounded-2xl border-2 border-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  <ArrowLeft size={18} />
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !isStepValid("security")}
+                  className={`flex flex-1 items-center justify-center gap-2 rounded-2xl px-5 py-3 font-semibold text-white shadow-lg transition ${content.accent} disabled:opacity-50`}
+                >
+                  {isSubmitting ? "Please wait..." : <>Complete Registration</>}
+                </button>
+              </div>
+            </>
+          )}
+
+          {!isRegister && (
+            <>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Email Address</label>
+                <div className="relative mt-2">
+                  <Mail className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <input
+                    name="email"
+                    required
+                    type="email"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    placeholder="name@example.com"
+                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+                {touched.email && errors.email && (
+                  <p className="mt-1 flex items-center gap-1 text-sm text-red-600">
+                    <XCircle size={14} /> {errors.email}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Password</label>
+                <div className="relative mt-2">
+                  <Lock className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <input
+                    name="password"
+                    required
+                    type={showPassword ? "text" : "password"}
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    placeholder="Enter password"
+                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 py-3 pl-11 pr-12 text-sm outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    className="absolute right-3 top-3 text-slate-500 transition hover:text-slate-800"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                  {error}
+                </div>
               )}
 
-              {isRegister && (
-                <>
-                  {error && (
-                    <div className="animate-scale-in rounded-md bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-                      {error}
-                    </div>
-                  )}
-                  {!isSubmitting && !error && Object.keys(errors).length > 0 && (
-                    <div className="rounded-md bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
-                      Please fix the errors above before continuing.
-                    </div>
-                  )}
-                </>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={`flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 font-semibold text-white shadow-lg transition hover:shadow-xl hover:-translate-y-0.5 ${content.accent} disabled:opacity-50`}
+              >
+                {isSubmitting ? "Signing in..." : <>Sign In</>}
+              </button>
+            </>
+          )}
+
+          {isRegister && (
+            <>
+              {error && (
+                <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                  {error}
+                </div>
               )}
-            </form>
+              {!isSubmitting && !error && Object.keys(errors).length > 0 && (
+                <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+                  Please fix the errors above before continuing.
+                </div>
+              )}
+            </>
+          )}
+        </form>
+
+        {!isRegister && (
+          <div className="mt-6 text-center text-sm text-slate-600">
+            Don&apos;t have an account?{" "}
+            <Link
+              to={`/${role}/register`}
+              className="font-semibold text-sky-700 transition hover:text-sky-800"
+            >
+              Create an Account
+            </Link>
           </div>
-        </section>
+        )}
+
+        <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {[
+            { title: "Secure Login", Icon: ShieldCheck, copy: "Your account is protected." },
+            { title: "Real-Time Updates", Icon: CheckCircle2, copy: "Track complaints instantly." },
+            { title: "Trusted Platform", Icon: ClipboardList, copy: "Reliable digital public service." },
+          ].map(({ title, Icon, copy }) => (
+            <div
+              key={title}
+              className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-center transition hover:shadow-md hover:-translate-y-0.5"
+            >
+              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-700">
+                <Icon size={20} />
+              </div>
+              <p className="mt-2 text-xs font-semibold text-slate-900">{title}</p>
+              <p className="text-xs text-slate-500">{copy}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  return (
+    <main className="min-h-screen bg-white">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="flex min-h-screen flex-col lg:flex-row gap-6 lg:gap-8">
+          <div className="order-2 lg:order-1 lg:w-[45%]">{leftContent}</div>
+          <div className="order-1 lg:order-2 lg:w-[55%]">{rightContent}</div>
+        </div>
       </div>
     </main>
   );

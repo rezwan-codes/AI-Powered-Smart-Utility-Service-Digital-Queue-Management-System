@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { Bot, Loader2, MessageCircle, Send, User2, Users, X } from "lucide-react";
 import { authService } from "../../services/authService";
 import { chatService } from "../../services/chatService";
 import { complaintService } from "../../services/complaintService";
 import { technicianService } from "../../services/technicianService";
 import type { Complaint, Technician, User } from "../../types/utility";
+import type { Conversation, ChatMessage as ServiceChatMessage } from "../../services/chatService";
 import { formatEta } from "../../utils/utilityDisplay";
 
 type Message = {
@@ -16,36 +17,7 @@ type Message = {
 
 type ChatMode = "bot" | "technician";
 
-type TechnicianConversation = {
-  id: string;
-  technician?: {
-    id: string;
-    name: string;
-    skill: string;
-    status: string;
-    phone?: string;
-  };
-  updatedAt: string;
-};
-
-type CitizenConversation = {
-  id: string;
-  citizen?: {
-    id: string;
-    name: string;
-    email: string;
-    phone?: string;
-  };
-  updatedAt: string;
-};
-
-type ChatMessage = {
-  id: string;
-  senderId: string;
-  senderRole: string;
-  text: string;
-  createdAt: string;
-};
+type ChatMessage = ServiceChatMessage & { timestamp: Date };
 
 export default function ChatBox() {
   const [isOpen, setIsOpen] = useState(false);
@@ -63,7 +35,7 @@ export default function ChatBox() {
   const [user, setUser] = useState<User | null>(null);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
-  const [conversations, setConversations] = useState<(TechnicianConversation | CitizenConversation)[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -155,6 +127,18 @@ export default function ChatBox() {
       pollTimerRef.current = null;
     };
   }, [mode, activeConversationId]);
+
+  const activeComplaints = useMemo(() => complaints.filter((c) => c.status !== "Completed"), [complaints]);
+
+  const assignedTechnicianIds = useMemo(() => {
+    const ids = new Set<string>();
+    activeComplaints.forEach((c) => {
+      if (c.technician?.id) ids.add(c.technician.id);
+    });
+    return ids;
+  }, [activeComplaints]);
+
+  const assignableTechnicians = useMemo(() => technicians.filter((t) => assignedTechnicianIds.has(t.id)), [technicians, assignedTechnicianIds]);
 
   const generateBotReply = (userMessage: string): string => {
     const lower = userMessage.toLowerCase();
@@ -287,7 +271,7 @@ export default function ChatBox() {
       setActiveConversationId(conversation.id);
       setConversations((prev) => [conversation, ...prev]);
     } catch {
-      // ignore
+      alert("You can only chat with technicians assigned to your active complaints.");
     }
   };
 
@@ -448,23 +432,31 @@ export default function ChatBox() {
                                 <User2 size={16} />
                               </div>
                               <div>
-                                <p className="text-sm font-semibold">{(conversation as CitizenConversation).citizen?.name ?? "Unknown"}</p>
-                                <p className="text-xs text-slate-500">{(conversation as CitizenConversation).citizen?.email}</p>
+                                <p className="text-sm font-semibold">{conversation.technician?.name ?? "Unknown"}</p>
+                                <p className="text-xs text-slate-500">{conversation.technician?.skill ?? ""}</p>
                               </div>
                             </div>
-                            <p className="text-xs text-slate-400">Tap to open chat</p>
+                            {conversation.complaint ? (
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">{conversation.complaint.token}</span>
+                                <span className="rounded-full bg-sky-50 px-1 py-0.5 text-[10px] font-bold text-sky-700">{conversation.complaint.status}</span>
+                                <span className="rounded-full bg-amber-50 px-1 py-0.5 text-[10px] font-bold text-amber-700">{conversation.complaint.priority}</span>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-slate-400">Tap to open chat</p>
+                            )}
                           </button>
                         ))}
                       </div>
                     )
                   ) : (
                     <div className="space-y-2">
-                      {technicians.map((technician) => {
-                        const hasConversation = conversations.some((c) => (c as TechnicianConversation).technician?.id === technician.id);
+                      {assignableTechnicians.map((technician) => {
+                        const hasConversation = conversations.some((c) => c.technician?.id === technician.id);
                         return (
                           <button
                             key={technician.id}
-                            onClick={() => (hasConversation ? handleOpenConversation((conversations.find((c) => (c as TechnicianConversation).technician?.id === technician.id) as TechnicianConversation).id) : handleStartConversation(technician.id))}
+                            onClick={() => (hasConversation ? handleOpenConversation(conversations.find((c) => c.technician?.id === technician.id)!.id) : handleStartConversation(technician.id))}
                             className="flex w-full flex-col gap-1 rounded-md border border-slate-200 bg-white p-3 text-left transition hover:border-sky-300 hover:bg-sky-50"
                           >
                             <div className="flex items-center gap-2">
@@ -495,9 +487,19 @@ export default function ChatBox() {
                       ← Back to list
                     </button>
                     <span className="text-xs text-slate-500">
-                      {isTechnician
-                        ? (conversations.find((c) => c.id === activeConversationId) as CitizenConversation | undefined)?.citizen?.name ?? "Chat"
-                        : (conversations.find((c) => c.id === activeConversationId) as TechnicianConversation | undefined)?.technician?.name ?? "Chat"}
+                      {(() => {
+                        const current = conversations.find((c) => c.id === activeConversationId);
+                        if (!current) return "Chat";
+                        const name = isTechnician ? current.citizen?.name : current.technician?.name;
+                        return (
+                          <>
+                            {name ?? "Chat"}
+                            {current.complaint && (
+                              <span className="ml-1 rounded bg-slate-100 px-1 py-0.5 text-[10px] font-bold text-slate-700">{current.complaint.token}</span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </span>
                   </div>
                   <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4">

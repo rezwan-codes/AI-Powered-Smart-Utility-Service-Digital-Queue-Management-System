@@ -8,7 +8,7 @@ import { requireAuth, requireRole } from "../middleware/auth.js";
 import { upload } from "../lib/multer.js";
 
 const router = Router();
-const utilityTypes = ["WATER", "GAS", "ELECTRICITY"];
+const utilityTypes = ["WATER", "GAS", "ELECTRICITY", "WASTE", "STREETLIGHT", "OTHERS"];
 const priorities = ["NORMAL", "HIGH", "EMERGENCY"];
 const statuses = ["PENDING", "PROCESSING", "COMPLETED", "CANCELLED"];
 
@@ -85,7 +85,7 @@ router.use(requireAuth);
 
 router.post(
   "/",
-  requireRole("CITIZEN", "ADMIN"),
+  requireRole("CITIZEN"),
   upload.single("photo"),
   async (req, res, next) => {
     try {

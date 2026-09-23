@@ -17,6 +17,9 @@ enum UtilityType {
   WATER
   GAS
   ELECTRICITY
+  WASTE
+  STREETLIGHT
+  OTHERS
 }
 
 enum ComplaintStatus {
@@ -52,21 +55,28 @@ enum RequestStatus {
 }
 
 model User {
-  id           String       @id @default(cuid())
-  name         String
-  email        String       @unique
-  passwordHash String
-  phone        String?
-  role         Role         @default(CITIZEN)
-  latitude     Float?
-  longitude    Float?
-  locationUpdatedAt DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  complaints   Complaint[]  @relation("CitizenComplaints")
-  reviews      Review[]     @relation("CitizenReviews")
-  technician   Technician?
+  id                   String       @id @default(cuid())
+  name                 String
+  email                String
+  passwordHash         String
+  phone                String?
+  role                 Role         @default(CITIZEN)
+  latitude             Float?
+  longitude            Float?
+  locationUpdatedAt    DateTime?
+  emailVerified        Boolean      @default(false)
+  verificationToken    String?
+  verificationExpires  DateTime?
+  resetToken           String?
+  resetExpires         DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  complaints           Complaint[]  @relation("CitizenComplaints")
+  reviews              Review[]     @relation("CitizenReviews")
+  technician           Technician?
   conversationsAsCitizen Conversation[] @relation("CitizenConversations")
+
+  @@unique([email, role])
 }
 
 model Technician {
@@ -186,4 +196,19 @@ model Message {
 
   @@index([conversationId])
   @@index([senderId])
+}
+
+model Notification {
+  id            String       @id @default(cuid())
+  recipientId   String
+  recipientRole String
+  type          String
+  title         String
+  body          String?
+  data          String?
+  isRead        Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+
+  @@index([recipientId, isRead])
+  @@index([createdAt])
 }
