@@ -1,0 +1,1 @@
+-- This migration was already applied to the database before the local migration history was restored.
